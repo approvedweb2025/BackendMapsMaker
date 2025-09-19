@@ -27,13 +27,12 @@ if (!fs.existsSync(uploadsDir)) {
 
 // ✅ Allowed Origins for CORS
 const allowedOrigins = [
-  "http://localhost:5173", // Local development
-  "https://maps-maker-frontend-8ntc.vercel.app" // Deployed frontend
+  "http://localhost:5173",
+  "https://maps-maker-frontend-8ntc.vercel.app"
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests without origin (like Postman, curl, mobile apps)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -44,17 +43,16 @@ app.use(cors({
 }));
 
 // ✅ Middlewares
-app.use(cookieParser()); 
+app.use(cookieParser());
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'mysecret',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === "production",
-secure: true, 
+    secure: process.env.NODE_ENV === "production", // only true in prod
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 1 day
+    maxAge: 24 * 60 * 60 * 1000
   }
 }));
 
@@ -90,8 +88,11 @@ app.get('/auth/google',
 app.get('/gtoken',
   passport.authenticate('google', {
     failureRedirect: `${process.env.FRONTEND_URL}/home`,
-    successRedirect: '/photos/sync-images', // must exist in photoRoutes
-  })
+  }),
+  (req, res) => {
+    // ✅ Redirect to frontend after successful login
+    res.redirect(`${process.env.FRONTEND_URL}/home`);
+  }
 );
 
 app.get('/logout', (req, res, next) => {
@@ -112,7 +113,7 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
-// ✅ Catch-all for unknown routes (optional)
+// ✅ Catch-all
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
 });

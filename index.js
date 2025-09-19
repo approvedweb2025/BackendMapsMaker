@@ -8,6 +8,7 @@ const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
 const path = require('path');
+const fs = require('fs');
 const Image = require('./models/Image.model.js');
 
 require('./auth/google.js');
@@ -16,40 +17,57 @@ dotenv.config();
 connectDB();
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
+// ✅ Ensure uploads folder exists
+const uploadsDir = path.join(__dirname, 'public/uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// ✅ Middlewares
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: 'http://localhost:5173',
   credentials: true,
 }));
 
+app.use(cookieParser()); // ✅ should come before session
+
 app.use(session({
-  secret: 'mysecret',
+  secret: process.env.SESSION_SECRET || 'mysecret',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: false, // true if HTTPS
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000
+    maxAge: 24 * 60 * 60 * 1000 // 1 day
   }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
-app.use(express.json());
-app.use(cookieParser());
 
-// Routes
+app.use(express.json());
+
+// ✅ Static folder for uploads
+app.use('/uploads', express.static(uploadsDir));
+
+// ✅ Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
+// Google Auth
 app.get('/', (req, res) => {
   res.send('<a href="/auth/google">Continue With Google</a>');
 });
 
-// Google auth routes
 app.get('/auth/google',
   passport.authenticate('google', {
-    scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.readonly'],
+    scope: [
+      'profile',
+      'email',
+      'https://www.googleapis.com/auth/drive.readonly'
+    ],
     accessType: 'offline',
     prompt: 'consent'
   })
@@ -58,7 +76,7 @@ app.get('/auth/google',
 app.get('/gtoken',
   passport.authenticate('google', {
     failureRedirect: `${process.env.FRONTEND_URL}/home`,
-    successRedirect: '/photos/sync-images',
+    successRedirect: '/photos/sync-images', // must exist in photoRoutes
   })
 );
 
@@ -69,6 +87,7 @@ app.get('/logout', (req, res, next) => {
   });
 });
 
+// ✅ Test API for images
 app.get('/api/images', async (req, res) => {
   try {
     const images = await Image.find({ latitude: { $ne: null }, longitude: { $ne: null } });
@@ -79,5 +98,6 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
-// ✅ Export the handler for Vercel
-module.exports = app;
+app.listen(PORT, () => {
+  console.log(`✅ Server is running on http://localhost:${PORT}`);
+});

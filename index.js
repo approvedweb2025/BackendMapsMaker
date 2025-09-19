@@ -27,7 +27,7 @@ if (!fs.existsSync(uploadsDir)) {
 
 // ✅ Middlewares
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: 'https://maps-maker-frontend-8ntc.vercel.app',
   credentials: true,
 }));
 

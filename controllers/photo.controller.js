@@ -47,25 +47,10 @@ const getPlaceDetails = async (lat, lng) => {
 
 // ✅ Sync Google Drive images → DB + uploads folder
 const syncImages = async (req, res) => {
+  if (!req.isAuthenticated()) return res.status(401).send('Not authenticated');
+  const accessToken = req.user.accessToken;
+
   try {
-    // 🔑 Get access token (from session or Authorization header)
-    let accessToken = req.user?.accessToken;
-    let email = req.user?.email;
-
-    if (!accessToken) {
-      const authHeader = req.headers.authorization;
-      if (!authHeader) return res.status(401).send("Not authenticated");
-
-      accessToken = authHeader.split(" ")[1];
-      if (!accessToken) return res.status(401).send("Invalid token");
-
-      // ✅ Verify token & extract email
-      const tokenInfo = await axios.get(`https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`);
-      email = tokenInfo.data.email;
-    }
-
-    if (!email) return res.status(401).send("Unauthorized user");
-
     let files = [];
     let nextPageToken = null;
 
@@ -85,6 +70,7 @@ const syncImages = async (req, res) => {
 
     console.log(`✅ Total files fetched: ${files.length}`);
 
+    // Ensure uploads folder exists
     const uploadsDir = path.join(__dirname, '..', 'public', 'uploads');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
@@ -99,6 +85,7 @@ const syncImages = async (req, res) => {
         const tempPath = path.join(os.tmpdir(), `${file.id}${ext}`);
         const permanentPath = path.join(uploadsDir, `${file.id}${ext}`);
 
+        // download from Google Drive
         await downloadFile(file.id, accessToken, tempPath);
 
         let latitude = null, longitude = null;
@@ -133,14 +120,16 @@ const syncImages = async (req, res) => {
           latitude,
           longitude,
           timestamp,
-          uploadedBy: email,
+          uploadedBy: req.user.email,
           lastCheckedAt: new Date(),
-          localPath: `/uploads/${file.id}${ext}`,
+          localPath: `/uploads/${file.id}${ext}`, // ✅ save reference
           ...placeDetails
         });
 
+        // copy to permanent uploads
         fs.copyFileSync(tempPath, permanentPath);
 
+        // delete temp file
         fs.rm(tempPath, { force: true }, (err) => {
           if (err) console.error(`❌ Failed to delete temp file: ${tempPath}`, err.message);
         });
@@ -149,14 +138,14 @@ const syncImages = async (req, res) => {
       }
     }
 
-    res.json({ message: "✅ Sync complete" });
+    res.redirect(`${process.env.FRONTEND_URL}/home`);
   } catch (err) {
-    console.error('❌ Sync error:', err.message);
+    console.error('❌ Sync error:', err);
     res.status(500).send('Failed to sync images');
   }
 };
 
-// ✅ Other endpoints
+// ✅ Get all photos
 const getPhotos = async (req, res) => {
   try {
     const photos = await Image.find().sort({ createdAt: -1 });
@@ -166,6 +155,7 @@ const getPhotos = async (req, res) => {
   }
 };
 
+// ✅ Monthly Stats (month + uploader + count)
 const getImageStatsByMonth = async (req, res) => {
   try {
     const monthlyStats = await Image.aggregate([
@@ -189,6 +179,7 @@ const getImageStatsByMonth = async (req, res) => {
   }
 };
 
+// ✅ Yearly Stats
 const getImageStatsByYear = async (req, res) => {
   try {
     const yearlyStats = await Image.aggregate([
@@ -210,6 +201,7 @@ const getImageStatsByYear = async (req, res) => {
   }
 };
 
+// ✅ Daily Stats
 const getImageStatsByDay = async (req, res) => {
   try {
     const dailyStats = await Image.aggregate([
@@ -231,6 +223,7 @@ const getImageStatsByDay = async (req, res) => {
   }
 };
 
+// ✅ Other helpers
 const getImagesByUploadedBy = async (req, res) => {
   try {
     const { uploadedBy } = req.params;
@@ -241,11 +234,44 @@ const getImagesByUploadedBy = async (req, res) => {
   }
 };
 
+const getFirstEmailImage = async (req, res) => {
+  try {
+    const email = 'mhuzaifa8519@gmail.com';
+    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
+    res.status(200).json(images);
+  } catch {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getSecondEmailImage = async (req, res) => {
+  try {
+    const email = 'mhuzaifa86797@gmail.com';
+    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
+    res.status(200).json(images);
+  } catch {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getThirdEmailImage = async (req, res) => {
+  try {
+    const email = 'muhammadjig8@gmail.com';
+    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
+    res.status(200).json(images);
+  } catch {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 module.exports = {
   syncImages,
   getPhotos,
   getImageStatsByMonth,
   getImageStatsByYear,
   getImageStatsByDay,
-  getImagesByUploadedBy
+  getImagesByUploadedBy,
+  getFirstEmailImage,
+  getSecondEmailImage,
+  getThirdEmailImage
 };

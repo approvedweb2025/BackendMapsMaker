@@ -138,7 +138,14 @@ const syncImages = async (req, res) => {
       }
     }
 
-    res.redirect(`${process.env.FRONTEND_URL}/home`);
+    // 🟢 Return JSON instead of redirect
+    const synced = await Image.find().sort({ createdAt: -1 });
+    res.status(200).json({
+      message: "✅ Sync complete",
+      total: synced.length,
+      photos: synced
+    });
+
   } catch (err) {
     console.error('❌ Sync error:', err);
     res.status(500).send('Failed to sync images');

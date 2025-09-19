@@ -25,20 +25,33 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// ✅ Middlewares
+// ✅ Allowed Origins for CORS
+const allowedOrigins = [
+  "http://localhost:5173", // Local development
+  "https://maps-maker-frontend-8ntc.vercel.app" // Deployed frontend
+];
+
 app.use(cors({
-  origin: 'https://maps-maker-frontend-8ntc.vercel.app',
+  origin: function (origin, callback) {
+    // Allow requests without origin (like Postman, curl, mobile apps)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   credentials: true,
 }));
 
-app.use(cookieParser()); // ✅ should come before session
+// ✅ Middlewares
+app.use(cookieParser()); 
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'mysecret',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false, // true if HTTPS
+    secure: process.env.NODE_ENV === "production", // true on production
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000 // 1 day
   }
@@ -46,17 +59,17 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
-
 app.use(express.json());
 
-// ✅ Static folder for uploads
+// ✅ Static folders
+app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(uploadsDir));
 
 // ✅ Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
-// Google Auth
+// Google Auth routes
 app.get('/', (req, res) => {
   res.send('<a href="/auth/google">Continue With Google</a>');
 });
@@ -96,6 +109,11 @@ app.get('/api/images', async (req, res) => {
     console.error('Failed to fetch images:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// ✅ Catch-all for unknown routes (optional)
+app.use((req, res) => {
+  res.status(404).json({ error: "Route not found" });
 });
 
 app.listen(PORT, () => {

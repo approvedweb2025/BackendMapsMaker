@@ -1,9 +1,10 @@
+// routes/photo.route.js
 const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
 const { getGridFSBucket } = require('../config/gridfs');
+const ensureAuth = require('../middleware/ensureAuth');
 
-// Controllers
 const {
   getImageStatsByMonth,
   syncImages,
@@ -11,43 +12,37 @@ const {
   getImagesByUploadedBy,
   getFirstEmailImage,
   getSecondEmailImage,
-  getThirdEmailImage
+  getThirdEmailImage,
 } = require('../controllers/photo.controller');
 
-// ✅ SYNC IMAGES AND SAVE IN DB (GridFS + Metadata)
-router.get('/sync-images', syncImages);
+// Sync images (protected)
+router.get('/sync-images', ensureAuth, syncImages);
 
-// ✅ GET ALL PHOTOS (Metadata only)
+// All photos (public or protect if you want)
 router.get('/get-photos', getPhotos);
 
-// ✅ GET IMAGE STATS BY MONTH
+// Stats
 router.get('/get-image-by-month', getImageStatsByMonth);
 
-// ✅ GET IMAGES BY UPLOADER EMAIL
+// By uploader
 router.get('/getImages/:uploadedBy', getImagesByUploadedBy);
 
-// ✅ SHORTCUT ROUTES FOR SPECIFIC EMAILS
+// Shortcuts
 router.get('/get1stEmailPhotos', getFirstEmailImage);
 router.get('/get2ndEmailPhotos', getSecondEmailImage);
 router.get('/get3rdEmailPhotos', getThirdEmailImage);
 
-// ✅ SERVE IMAGE FROM GRIDFS BY ID
+// Serve image from GridFS by file id (if you ever store into GridFS)
 router.get('/file/:id', async (req, res) => {
   try {
     const bucket = getGridFSBucket();
     const fileId = new ObjectId(req.params.id);
 
     const downloadStream = bucket.openDownloadStream(fileId);
+    downloadStream.on('error', () => res.status(404).json({ error: 'File not found in GridFS' }));
 
-    // Agar file not found hui
-    downloadStream.on('error', () => {
-      return res.status(404).json({ error: 'File not found in GridFS' });
-    });
-
-    // ✅ Stream image to client
-    res.set('Content-Type', 'image/jpeg'); // optionally adjust mimeType
+    res.set('Content-Type', 'image/jpeg');
     downloadStream.pipe(res);
-
   } catch (err) {
     console.error('❌ GridFS fetch error:', err.message);
     res.status(500).json({ error: 'Internal server error', details: err.message });

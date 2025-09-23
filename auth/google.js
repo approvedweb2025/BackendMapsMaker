@@ -15,17 +15,14 @@ passport.use(new GoogleStrategy({
 },
     async function (req, accessToken, refreshToken, profile, done) {
         try {
-            // ✅ Get email safely
             const email = profile.emails?.[0]?.value;
 
-            // ❌ You forgot to define `email` in your code before using it
             if (!email || !allowedEmails.includes(email)) {
                 return done(null, false, { message: 'Unauthorized email' });
             }
 
-            // ✅ Optional: Fetch token info (you can keep or skip this)
-            const tokenInfo = await axios.get(`https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`);
-       
+            // optional token info
+            await axios.get(`https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`);
 
             const user = {
                 displayName: profile.displayName,
@@ -44,12 +41,7 @@ passport.use(new GoogleStrategy({
 ));
 
 passport.serializeUser((user, done) => {
-    done(null, {
-        email: user.email,
-        accessToken: user.accessToken,
-        refreshToken: user.refreshToken,
-        displayName: user.displayName
-    });
+    done(null, user);
 });
 
 passport.deserializeUser((user, done) => {

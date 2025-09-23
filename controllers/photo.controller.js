@@ -1,26 +1,36 @@
 // controllers/photo.controller.js
 const axios = require('axios');
 const path = require('path');
-const fs = require('fs');
 const exifr = require('exifr');
+const { PassThrough } = require('stream');
+const { Upload } = require('@aws-sdk/lib-storage');
+const { s3 } = require('../config/aws');
+const { PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const Image = require('../models/Image.model');
 
-// Download file from Google Drive directly into permanent path
-const downloadFile = async (fileId, accessToken, destPath) => {
-  const response = await axios.get(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-    { headers: { Authorization: `Bearer ${accessToken}` }, responseType: 'stream' }
-  );
-
-  await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
-
-  const writer = fs.createWriteStream(destPath);
-  await new Promise((resolve, reject) => {
-    response.data.pipe(writer);
-    writer.on('finish', resolve);
-    writer.on('error', reject);
+// Upload a stream to S3
+async function uploadStreamToS3({ Bucket, Key, ContentType, Body }) {
+  const parallelUpload = new Upload({
+    client: s3,
+    params: { Bucket, Key, Body, ContentType, ACL: 'public-read' },
+    queueSize: 4,
+    partSize: 5 * 1024 * 1024,
+    leavePartsOnError: false,
   });
-};
+  await parallelUpload.done();
+  const base = process.env.AWS_CDN_BASE || `https://${Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com`;
+  return `${base}/${Key}`;
+}
+
+// Check if S3 object exists
+async function s3Exists(Bucket, Key) {
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket, Key }));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Reverse Geocoding via Google API
 const getPlaceDetails = async (lat, lng) => {
@@ -48,7 +58,7 @@ const getPlaceDetails = async (lat, lng) => {
   }
 };
 
-// Sync Google Drive images → DB + uploads folder
+// ✅ Sync Google Drive images → S3 + MongoDB metadata
 const syncImages = async (req, res) => {
   if (!req.isAuthenticated || !req.isAuthenticated()) {
     return res.status(401).json({ error: 'Not authenticated' });
@@ -56,6 +66,9 @@ const syncImages = async (req, res) => {
   const accessToken = req.user.accessToken;
 
   try {
+    const Bucket = process.env.S3_BUCKET;
+    if (!Bucket) return res.status(500).json({ error: 'S3_BUCKET not configured' });
+
     let files = [];
     let nextPageToken = null;
 
@@ -76,43 +89,58 @@ const syncImages = async (req, res) => {
 
     console.log(`✅ Total files fetched: ${files.length}`);
 
-    const uploadsDir = path.join(__dirname, '..', 'public', 'uploads');
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-
     for (const file of files) {
       try {
         const exists = await Image.findOne({ fileId: file.id });
         const ext = path.extname(file.name) || '.jpg';
-        const permanentPath = path.join(uploadsDir, `${file.id}${ext}`);
+        const Key = `images/${file.id}${ext}`;
 
-        if (exists || fs.existsSync(permanentPath)) {
-          console.log(`⏭️ Skipping ${file.name} (already saved)`);
-          continue;
+        // if already in DB and S3, skip
+        if (exists) {
+          const already = await s3Exists(Bucket, exists.s3Key || Key);
+          if (already) {
+            console.log(`⏭️ Skipping ${file.name} (already saved)`);
+            continue;
+          }
         }
 
-        await downloadFile(file.id, accessToken, permanentPath);
+        // Stream download from Drive
+        const driveResp = await axios.get(
+          `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+          { headers: { Authorization: `Bearer ${accessToken}` }, responseType: 'stream' }
+        );
 
-        let latitude = null,
-          longitude = null;
+        // tap stream into buffer for EXIF while also piping to S3
+        const pass = new PassThrough();
+        driveResp.data.pipe(pass);
+
+        // 1) Upload to S3 (stream)
+        const s3UrlPromise = uploadStreamToS3({
+          Bucket,
+          Key,
+          ContentType: file.mimeType || 'image/jpeg',
+          Body: pass,
+        });
+
+        // 2) Separately, also load for EXIF by re-fetching small buffer (Drive streaming twice is OK)
+        let latitude = null, longitude = null;
         let timestamp = new Date(file.createdTime || Date.now());
-
-        // Safe EXIF parse
-        let exifData = null;
         try {
           if (['image/jpeg', 'image/jpg', 'image/tiff'].includes(file.mimeType)) {
-            exifData = (await exifr.parse(permanentPath)) || {};
+            const bufResp = await axios.get(
+              `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+              { headers: { Authorization: `Bearer ${accessToken}` }, responseType: 'arraybuffer' }
+            );
+            const exifData = (await exifr.parse(Buffer.from(bufResp.data))) || {};
+            latitude = exifData?.latitude ?? null;
+            longitude = exifData?.longitude ?? null;
+            if (exifData?.DateTimeOriginal) {
+              const dt = new Date(exifData.DateTimeOriginal);
+              if (!isNaN(dt)) timestamp = dt;
+            }
           }
         } catch (err) {
           console.warn(`⚠️ EXIF error for ${file.name}:`, err.message);
-        }
-
-        latitude = exifData?.latitude ?? null;
-        longitude = exifData?.longitude ?? null;
-        if (exifData?.DateTimeOriginal) {
-          const dt = new Date(exifData.DateTimeOriginal);
-          if (!isNaN(dt)) timestamp = dt;
         }
 
         let placeDetails = { district: '', tehsil: '', village: '', country: '' };
@@ -120,20 +148,27 @@ const syncImages = async (req, res) => {
           placeDetails = await getPlaceDetails(latitude, longitude);
         }
 
-        await Image.create({
-          fileId: file.id,
-          name: file.name,
-          mimeType: file.mimeType,
-          latitude,
-          longitude,
-          timestamp,
-          uploadedBy: req.user?.email || 'unknown',
-          lastCheckedAt: new Date(),
-          localPath: `/uploads/${file.id}${ext}`,
-          // optionally mirror:
-          ImageURL: `/uploads/${file.id}${ext}`,
-          ...placeDetails,
-        });
+        const s3Url = await s3UrlPromise;
+
+        await Image.findOneAndUpdate(
+          { fileId: file.id },
+          {
+            fileId: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            latitude,
+            longitude,
+            timestamp,
+            uploadedBy: req.user?.email || 'unknown',
+            lastCheckedAt: new Date(),
+            s3Key: Key,
+            s3Url,
+            ImageURL: s3Url, // for backwards compatibility
+            localPath: null,
+            ...placeDetails,
+          },
+          { upsert: true, new: true }
+        );
       } catch (fileErr) {
         console.error(`❌ Error processing file ${file.name}:`, fileErr.message || fileErr);
       }
@@ -161,23 +196,21 @@ const getPhotos = async (req, res) => {
   }
 };
 
-// Monthly Stats (month + uploader + count)
+// Monthly Stats
 const getImageStatsByMonth = async (req, res) => {
   try {
     const monthlyStats = await Image.aggregate([
-      {
-        $group: {
+      { $group: {
           _id: {
             month: { $dateToString: { format: '%Y-%m', date: '$timestamp' } },
             uploadedBy: '$uploadedBy',
           },
           count: { $sum: 1 },
-        },
+        }
       },
       { $project: { month: '$_id.month', uploadedBy: '$_id.uploadedBy', count: 1, _id: 0 } },
       { $sort: { month: 1 } },
     ]);
-
     const uniqueUploaders = [...new Set(monthlyStats.map((s) => s.uploadedBy).filter(Boolean))];
     res.status(200).json({ stats: monthlyStats, uniqueUploaders });
   } catch (err) {
@@ -189,14 +222,13 @@ const getImageStatsByMonth = async (req, res) => {
 const getImageStatsByYear = async (req, res) => {
   try {
     const yearlyStats = await Image.aggregate([
-      {
-        $group: {
+      { $group: {
           _id: {
             year: { $dateToString: { format: '%Y', date: '$timestamp' } },
             uploadedBy: '$uploadedBy',
           },
           count: { $sum: 1 },
-        },
+        }
       },
       { $project: { year: '$_id.year', uploadedBy: '$_id.uploadedBy', count: 1, _id: 0 } },
       { $sort: { year: 1 } },
@@ -211,14 +243,13 @@ const getImageStatsByYear = async (req, res) => {
 const getImageStatsByDay = async (req, res) => {
   try {
     const dailyStats = await Image.aggregate([
-      {
-        $group: {
+      { $group: {
           _id: {
             date: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } },
             uploadedBy: '$uploadedBy',
           },
           count: { $sum: 1 },
-        },
+        }
       },
       { $project: { date: '$_id.date', uploadedBy: '$_id.uploadedBy', count: 1, _id: 0 } },
       { $sort: { date: 1 } },
@@ -243,11 +274,7 @@ const getImagesByUploadedBy = async (req, res) => {
 const getFirstEmailImage = async (req, res) => {
   try {
     const email = 'mhuzaifa8519@gmail.com';
-    const images = await Image.find({
-      uploadedBy: email,
-      longitude: { $ne: null },
-      latitude: { $ne: null },
-    });
+    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
     res.status(200).json(images);
   } catch {
     res.status(500).json({ error: 'Internal server error' });
@@ -257,11 +284,7 @@ const getFirstEmailImage = async (req, res) => {
 const getSecondEmailImage = async (req, res) => {
   try {
     const email = 'mhuzaifa86797@gmail.com';
-    const images = await Image.find({
-      uploadedBy: email,
-      longitude: { $ne: null },
-      latitude: { $ne: null },
-    });
+    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
     res.status(200).json(images);
   } catch {
     res.status(500).json({ error: 'Internal server error' });
@@ -271,11 +294,7 @@ const getSecondEmailImage = async (req, res) => {
 const getThirdEmailImage = async (req, res) => {
   try {
     const email = 'muhammadjig8@gmail.com';
-    const images = await Image.find({
-      uploadedBy: email,
-      longitude: { $ne: null },
-      latitude: { $ne: null },
-    });
+    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
     res.status(200).json(images);
   } catch {
     res.status(500).json({ error: 'Internal server error' });

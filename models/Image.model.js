@@ -8,7 +8,7 @@ const imageSchema = new mongoose.Schema({
   latitude: Number,
   longitude: Number,
   uploadedBy: String,
-  localPath: String,   // ✅ add this
+  localPath: String,   // ✅ new field
   lastCheckedAt: { type: Date, default: null },
   district: String,
   village: String,
@@ -17,3 +17,4 @@ const imageSchema = new mongoose.Schema({
   timestamp: { type: Date, required: true, index: true }
 }, { timestamps: true });
 
+module.exports = mongoose.model('Image', imageSchema);

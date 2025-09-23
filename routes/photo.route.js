@@ -15,32 +15,30 @@ const {
   getThirdEmailImage,
 } = require('../controllers/photo.controller');
 
-// Sync images (protected)
+// protect sync
 router.get('/sync-images', ensureAuth, syncImages);
 
-// All photos (public or protect if you want)
+// public listing (or protect if needed)
 router.get('/get-photos', getPhotos);
 
-// Stats
+// stats
 router.get('/get-image-by-month', getImageStatsByMonth);
 
-// By uploader
+// by uploader
 router.get('/getImages/:uploadedBy', getImagesByUploadedBy);
 
-// Shortcuts
+// shortcuts
 router.get('/get1stEmailPhotos', getFirstEmailImage);
 router.get('/get2ndEmailPhotos', getSecondEmailImage);
 router.get('/get3rdEmailPhotos', getThirdEmailImage);
 
-// Serve image from GridFS by file id (if you ever store into GridFS)
+// optional: GridFS fetch
 router.get('/file/:id', async (req, res) => {
   try {
     const bucket = getGridFSBucket();
     const fileId = new ObjectId(req.params.id);
-
     const downloadStream = bucket.openDownloadStream(fileId);
     downloadStream.on('error', () => res.status(404).json({ error: 'File not found in GridFS' }));
-
     res.set('Content-Type', 'image/jpeg');
     downloadStream.pipe(res);
   } catch (err) {

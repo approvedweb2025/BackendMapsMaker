@@ -7,6 +7,7 @@ const photoRoutes = require('./routes/photo.route.js');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
+const MongoStore = require('connect-mongo'); // ✅ Use MongoStore instead of memory
 const path = require('path');
 const Image = require('./models/Image.model.js');
 const serverless = require('serverless-http');
@@ -18,6 +19,7 @@ connectDB();
 
 const app = express();
 
+// ✅ Allowed Origins
 const allowedOrigins = [
   "http://localhost:5173",
   "https://maps-maker-frontend-8ntc.vercel.app"
@@ -34,12 +36,14 @@ app.use(cors({
   credentials: true,
 }));
 
+// ✅ Middlewares
 app.use(cookieParser());
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'mysecret',
   resave: false,
   saveUninitialized: false,
+  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }), // ✅ Persistent session
   cookie: {
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
@@ -51,11 +55,16 @@ app.use(passport.initialize());
 app.use(passport.session());
 app.use(express.json());
 
-// Routes
+// ✅ Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
-app.get('/', (req, res) => res.send("API running"));
+// ✅ Test Route
+app.get('/', (req, res) => res.send("API running 🚀"));
 
+/**
+ * ❌ Vercel does not allow `app.listen`
+ * ✅ Export as serverless handler
+ */
 module.exports = app;
-module.exports.handler = serverless(app); // ✅ export for Vercel
+module.exports.handler = serverless(app);

@@ -1,11 +1,10 @@
 const axios = require('axios');
 const path = require('path');
-const os = require('os');
 const fs = require('fs');
 const exifr = require('exifr');
 const Image = require('../models/Image.model');
 
-// ✅ Download file from Google Drive
+// ✅ Download file from Google Drive directly into permanent path
 const downloadFile = async (fileId, accessToken, destPath) => {
   const response = await axios.get(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
@@ -47,7 +46,7 @@ const getPlaceDetails = async (lat, lng) => {
 
 // ✅ Sync Google Drive images → DB + uploads folder
 const syncImages = async (req, res) => {
-  if (!req.isAuthenticated()) return res.status(401).send('Not authenticated');
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
   const accessToken = req.user.accessToken;
 
   try {
@@ -79,26 +78,27 @@ const syncImages = async (req, res) => {
     for (const file of files) {
       try {
         const exists = await Image.findOne({ fileId: file.id });
-        if (exists) continue;
-
         const ext = path.extname(file.name) || '.jpg';
-        const tempPath = path.join(os.tmpdir(), `${file.id}${ext}`);
         const permanentPath = path.join(uploadsDir, `${file.id}${ext}`);
 
-        // download from Google Drive
-        await downloadFile(file.id, accessToken, tempPath);
+        // ✅ Skip if already exists
+        if (exists || fs.existsSync(permanentPath)) {
+          console.log(`⏭️ Skipping ${file.name} (already saved)`);
+          continue;
+        }
+
+        // ✅ Download directly into uploads folder
+        await downloadFile(file.id, accessToken, permanentPath);
 
         let latitude = null, longitude = null;
         let timestamp = new Date(file.createdTime || Date.now());
 
         try {
           if (['image/jpeg', 'image/jpg', 'image/tiff'].includes(file.mimeType)) {
-            const exifData = await exifr.parse(tempPath);
+            const exifData = await exifr.parse(permanentPath);
             if (exifData) {
-              if (exifData.latitude && exifData.longitude) {
-                latitude = exifData.latitude;
-                longitude = exifData.longitude;
-              }
+              latitude = exifData.latitude || null;
+              longitude = exifData.longitude || null;
               if (exifData.DateTimeOriginal) {
                 timestamp = new Date(exifData.DateTimeOriginal);
               }
@@ -113,6 +113,7 @@ const syncImages = async (req, res) => {
           placeDetails = await getPlaceDetails(latitude, longitude);
         }
 
+        // ✅ Save to MongoDB
         await Image.create({
           fileId: file.id,
           name: file.name,
@@ -120,25 +121,18 @@ const syncImages = async (req, res) => {
           latitude,
           longitude,
           timestamp,
-          uploadedBy: req.user.email,
+          uploadedBy: req.user?.email || "unknown",
           lastCheckedAt: new Date(),
-          localPath: `/uploads/${file.id}${ext}`, // ✅ save reference
+          localPath: `/uploads/${file.id}${ext}`, // ✅ stored path for frontend
           ...placeDetails
         });
 
-        // copy to permanent uploads
-        fs.copyFileSync(tempPath, permanentPath);
-
-        // delete temp file
-        fs.rm(tempPath, { force: true }, (err) => {
-          if (err) console.error(`❌ Failed to delete temp file: ${tempPath}`, err.message);
-        });
       } catch (fileErr) {
         console.error(`❌ Error processing file ${file.name}:`, fileErr);
       }
     }
 
-    // 🟢 Return JSON instead of redirect
+    // 🟢 Return all synced images
     const synced = await Image.find().sort({ createdAt: -1 });
     res.status(200).json({
       message: "✅ Sync complete",
@@ -148,7 +142,7 @@ const syncImages = async (req, res) => {
 
   } catch (err) {
     console.error('❌ Sync error:', err);
-    res.status(500).send('Failed to sync images');
+    res.status(500).json({ error: 'Failed to sync images', details: err.message });
   }
 };
 

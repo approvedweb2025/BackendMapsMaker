@@ -3,20 +3,30 @@ const mongoose = require('mongoose');
 
 const imageSchema = new mongoose.Schema(
   {
-    ImageURL: { type: String, default: null }, // optional; you can map this to localPath if you want
-    fileId: { type: String, unique: true, required: true },
+    // keep if you want a general URL field:
+    ImageURL: { type: String, default: null },
+
+    fileId: { type: String, unique: true, required: true }, // Google Drive file id
     name: String,
     mimeType: String,
+
+    // Geo
     latitude: Number,
     longitude: Number,
-    uploadedBy: String,
-    localPath: String, // e.g. "/uploads/<fileId>.jpg"
-    lastCheckedAt: { type: Date, default: null },
     district: String,
     village: String,
     tehsil: String,
     country: String,
+
+    // Uploader & time
+    uploadedBy: String,
     timestamp: { type: Date, required: true, index: true },
+    lastCheckedAt: { type: Date, default: null },
+
+    // Storage
+    s3Key: { type: String, default: null }, // e.g. images/<fileId>.jpg
+    s3Url: { type: String, default: null }, // full https url
+    localPath: { type: String, default: null }, // legacy, not used on AWS
   },
   { timestamps: true }
 );

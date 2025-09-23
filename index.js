@@ -11,23 +11,24 @@ const path = require('path');
 const fs = require('fs');
 const Image = require('./models/Image.model.js');
 
-require('./auth/google.js'); // ✅ Google OAuth Strategy
+require('./auth/google.js');
 
 dotenv.config();
 connectDB();
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// ✅ Ensure uploads folder exists (for production also)
+// ✅ Ensure uploads folder exists
 const uploadsDir = path.join(__dirname, 'public/uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// ✅ CORS for both local and deployed frontend
+// ✅ Allowed Origins for CORS
 const allowedOrigins = [
-  "http://localhost:5173",              
-  "https://maps-maker-frontend-8ntc.vercel.app" 
+  "http://localhost:5173",
+  "https://maps-maker-frontend-8ntc.vercel.app"
 ];
 
 app.use(cors({
@@ -49,26 +50,25 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production", // only true in prod
     httpOnly: true,
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    maxAge: 24 * 60 * 60 * 1000 
+    maxAge: 24 * 60 * 60 * 1000
   }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
-
 app.use(express.json());
 
-// ✅ Static folder for uploads
+// ✅ Static folders
+app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(uploadsDir));
 
 // ✅ Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
-// Google OAuth flow
+// Google Auth routes
 app.get('/', (req, res) => {
   res.send('<a href="/auth/google">Continue With Google</a>');
 });
@@ -87,9 +87,12 @@ app.get('/auth/google',
 
 app.get('/gtoken',
   passport.authenticate('google', {
-    failureRedirect: `${process.env.FRONTEND_URL || "https://maps-maker-frontend-8ntc.vercel.app"}/home`,
-    successRedirect: '/photos/sync-images',
-  })
+    failureRedirect: `${process.env.FRONTEND_URL}/home`,
+  }),
+  (req, res) => {
+    // ✅ Redirect to frontend after successful login
+    res.redirect(`${process.env.FRONTEND_URL}/home`);
+  }
 );
 
 app.get('/logout', (req, res, next) => {
@@ -99,7 +102,7 @@ app.get('/logout', (req, res, next) => {
   });
 });
 
-// ✅ API for frontend to fetch images
+// ✅ Test API for images
 app.get('/api/images', async (req, res) => {
   try {
     const images = await Image.find({ latitude: { $ne: null }, longitude: { $ne: null } });
@@ -110,6 +113,11 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
-// ❌ REMOVE app.listen()
-// ✅ Export app for Vercel
-module.exports = app;
+// ✅ Catch-all
+app.use((req, res) => {
+  res.status(404).json({ error: "Route not found" });
+});
+
+app.listen(PORT, () => {
+  console.log(`✅ Server is running on http://localhost:${PORT}`);
+});

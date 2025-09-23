@@ -7,9 +7,7 @@ const photoRoutes = require('./routes/photo.route.js');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
-const MongoStore = require('connect-mongo'); // ✅ Use MongoStore instead of memory
-const path = require('path');
-const Image = require('./models/Image.model.js');
+const MongoStore = require('connect-mongo'); // ✅ add this
 const serverless = require('serverless-http');
 
 require('./auth/google.js');
@@ -43,7 +41,7 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'mysecret',
   resave: false,
   saveUninitialized: false,
-  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }), // ✅ Persistent session
+  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }), // ✅ persistent session
   cookie: {
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
@@ -59,13 +57,8 @@ app.use(express.json());
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
-// ✅ Test Route
 app.get('/', (req, res) => res.send("API running 🚀"));
 
-/**
- * ❌ Vercel does not allow `app.listen`
- * ✅ Export as serverless handler
- */
-const handler = serverless(app);
-module.exports = handler;
-
+// ❌ don't do double export
+// ✅ Only export serverless handler
+module.exports = serverless(app);

@@ -1,7 +1,6 @@
 const mongoose = require('mongoose');
 
 const imageSchema = new mongoose.Schema({
-  ImageURL: { type: String, default: null },
   fileId: { type: String, unique: true, required: true },
   name: String,
   mimeType: String,
@@ -13,7 +12,11 @@ const imageSchema = new mongoose.Schema({
   village: String,
   tehsil: String,
   country: String,
-  timestamp: { type: Date, required: true, index: true }
+  timestamp: { type: Date, required: true, index: true },
+
+  // ✅ hosted links instead of localPath
+  driveLink: { type: String, default: null },
+  thumbnailLink: { type: String, default: null }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Image', imageSchema);

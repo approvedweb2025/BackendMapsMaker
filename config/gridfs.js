@@ -1,31 +1,24 @@
 // config/gridfs.js
-const mongoose = require("mongoose");
-const { GridFSBucket } = require("mongodb");
+const mongoose = require('mongoose');
+const { GridFSBucket } = require('mongodb');
 
-let gfsBucket; // GridFS bucket instance
+let bucket = null;
 
-/**
- * Initialize GridFS after MongoDB connection opens
- */
-const initGridFS = () => {
+function initGridFS() {
   const db = mongoose.connection.db;
   if (!db) {
-    console.error("❌ MongoDB connection not ready for GridFS");
+    console.warn('GridFS init skipped: no db connection yet.');
     return;
   }
+  bucket = new GridFSBucket(db, { bucketName: 'uploads' });
+  console.log('✅ GridFSBucket initialized (bucket: uploads)');
+}
 
-  gfsBucket = new GridFSBucket(db, { bucketName: "uploads" });
-  console.log("✅ GridFS initialized with bucket name: uploads");
-};
-
-/**
- * Get current GridFS bucket
- */
-const getGridFSBucket = () => {
-  if (!gfsBucket) {
-    throw new Error("GridFS not initialized yet. Call initGridFS after DB connect.");
+function getGridFSBucket() {
+  if (!bucket) {
+    throw new Error('GridFS bucket not initialized yet.');
   }
-  return gfsBucket;
-};
+  return bucket;
+}
 
 module.exports = { initGridFS, getGridFSBucket };

@@ -8,7 +8,6 @@ const imageSchema = new mongoose.Schema({
   latitude: Number,
   longitude: Number,
   uploadedBy: String,
-  localPath: String,   // ✅ new field
   lastCheckedAt: { type: Date, default: null },
   district: String,
   village: String,

@@ -32,11 +32,24 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+}));
+
+// ✅ Allow preflight (OPTIONS) for all routes
+app.options('*', cors({
   origin: allowedOrigins,
   credentials: true,
 }));
 
 // ✅ Middlewares
+app.use(express.json());
 app.use(cookieParser());
 
 app.use(session({
@@ -44,15 +57,15 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production", // HTTPS only in prod
     httpOnly: true,
+    sameSite: "none", // ✅ needed for cross-site cookies
     maxAge: 24 * 60 * 60 * 1000
   }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
-app.use(express.json());
 
 // ✅ Static folders
 app.use(express.static(path.join(__dirname, 'public')));

@@ -7,8 +7,10 @@ const photoRoutes = require('./routes/photo.route.js');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
-const MongoStore = require('connect-mongo'); // ✅ add this
-const serverless = require('serverless-http');
+const path = require('path');
+const fs = require('fs');
+const Image = require('./models/Image.model.js');
+const serverless = require('serverless-http'); // ✅ added
 
 require('./auth/google.js');
 
@@ -17,7 +19,13 @@ connectDB();
 
 const app = express();
 
-// ✅ Allowed Origins
+// ✅ Ensure uploads folder exists
+const uploadsDir = path.join(__dirname, 'public/uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// ✅ Middlewares
 const allowedOrigins = [
   "http://localhost:5173",
   "https://maps-maker-frontend-8ntc.vercel.app"
@@ -34,31 +42,38 @@ app.use(cors({
   credentials: true,
 }));
 
-// ✅ Middlewares
 app.use(cookieParser());
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'mysecret',
   resave: false,
   saveUninitialized: false,
-  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }), // ✅ persistent session
   cookie: {
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000
+    maxAge: 24 * 60 * 60 * 1000 // 1 day
   }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
+
 app.use(express.json());
+
+// ✅ Static folder for uploads
+app.use('/uploads', express.static(uploadsDir));
 
 // ✅ Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
-app.get('/', (req, res) => res.send("API running 🚀"));
+app.get('/', (req, res) => {
+  res.send('<a href="/auth/google">Continue With Google</a>');
+});
 
-// ❌ don't do double export
-// ✅ Only export serverless handler
-module.exports = serverless(app);
+// ❌ REMOVE app.listen()
+// app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
+// ✅ EXPORT for Vercel
+module.exports = app;
+module.exports.handler = serverless(app);

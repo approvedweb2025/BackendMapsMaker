@@ -17,7 +17,6 @@ dotenv.config();
 connectDB();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 // ✅ Ensure uploads folder exists (for production also)
 const uploadsDir = path.join(__dirname, 'public/uploads');
@@ -27,8 +26,8 @@ if (!fs.existsSync(uploadsDir)) {
 
 // ✅ CORS for both local and deployed frontend
 const allowedOrigins = [
-  "http://localhost:5173",              // Local Dev
-  "https://maps-maker-frontend-8ntc.vercel.app" // Production Frontend
+  "http://localhost:5173",              
+  "https://maps-maker-frontend-8ntc.vercel.app" 
 ];
 
 app.use(cors({
@@ -50,10 +49,10 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === "production", // ✅ secure in prod
+    secure: process.env.NODE_ENV === "production",
     httpOnly: true,
     sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    maxAge: 24 * 60 * 60 * 1000 // 1 day
+    maxAge: 24 * 60 * 60 * 1000 
   }
 }));
 
@@ -74,7 +73,6 @@ app.get('/', (req, res) => {
   res.send('<a href="/auth/google">Continue With Google</a>');
 });
 
-// Start Google Auth
 app.get('/auth/google',
   passport.authenticate('google', {
     scope: [
@@ -87,15 +85,13 @@ app.get('/auth/google',
   })
 );
 
-// OAuth Callback
 app.get('/gtoken',
   passport.authenticate('google', {
     failureRedirect: `${process.env.FRONTEND_URL || "https://maps-maker-frontend-8ntc.vercel.app"}/home`,
-    successRedirect: '/photos/sync-images', // must exist in photoRoutes
+    successRedirect: '/photos/sync-images',
   })
 );
 
-// Logout
 app.get('/logout', (req, res, next) => {
   req.logout(err => {
     if (err) return next(err);
@@ -114,7 +110,6 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
-// ✅ Deployment-ready listen
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Server is running on http://localhost:${PORT}`);
-});
+// ❌ REMOVE app.listen()
+// ✅ Export app for Vercel
+module.exports = app;

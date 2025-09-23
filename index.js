@@ -32,13 +32,7 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
+  origin: allowedOrigins,
   credentials: true,
 }));
 
@@ -50,7 +44,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === "production", // only true in prod
+    secure: process.env.NODE_ENV === "production",
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000
   }
@@ -85,13 +79,14 @@ app.get('/auth/google',
   })
 );
 
+// ✅ Fix: Instead of forcing redirect, send JSON to frontend
 app.get('/gtoken',
-  passport.authenticate('google', {
-    failureRedirect: `${process.env.FRONTEND_URL}/home`,
-  }),
+  passport.authenticate('google', { failureRedirect: '/' }),
   (req, res) => {
-    // ✅ Redirect to frontend after successful login
-    res.redirect(`${process.env.FRONTEND_URL}/home`);
+    res.json({
+      success: true,
+      user: req.user
+    });
   }
 );
 
@@ -105,6 +100,10 @@ app.get('/logout', (req, res, next) => {
 // ✅ Test API for images
 app.get('/api/images', async (req, res) => {
   try {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
     const images = await Image.find({ latitude: { $ne: null }, longitude: { $ne: null } });
     res.json(images);
   } catch (err) {

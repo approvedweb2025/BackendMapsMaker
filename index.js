@@ -66,5 +66,6 @@ app.get('/', (req, res) => res.send("API running 🚀"));
  * ❌ Vercel does not allow `app.listen`
  * ✅ Export as serverless handler
  */
-module.exports = app;
-module.exports.handler = serverless(app);
+const handler = serverless(app);
+module.exports = handler;
+

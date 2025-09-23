@@ -3,73 +3,41 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const { initGridFS } = require('./gridfs');
 
-try {
-  require('dns').setDefaultResultOrder('ipv4first');
-} catch (_) {}
-
+try { require('dns').setDefaultResultOrder('ipv4first'); } catch (_) {}
 dotenv.config();
 mongoose.set('strictQuery', false);
 
-const connectDB = async () => {
-  const uri = process.env.MONGO_URI;
-  const fallbackUri = process.env.MONGO_URI_SEEDLIST;
+// ✅ Cache connection for server restarts (PM2/EB reuse)
+let cached = global._mongooseCached || { conn: null, promise: null };
+global._mongooseCached = cached;
 
-  if (!uri) {
-    console.error('Error: MONGO_URI is not set in your environment.');
-    process.exit(1);
-  }
+async function connectDB() {
+  if (cached.conn) return cached.conn;
 
-  const isSrv = uri.startsWith('mongodb+srv://');
+  if (!cached.promise) {
+    const uri = process.env.MONGO_URI;
+    if (!uri) {
+      console.error('Error: MONGO_URI is not set.');
+      process.exit(1);
+    }
 
-  try {
-    const conn = await mongoose.connect(uri, {
+    cached.promise = mongoose.connect(uri, {
       serverSelectionTimeoutMS: 10000,
       retryWrites: true,
+      // bufferCommands false prevents queue buildup during cold start
+      bufferCommands: false,
+    }).then((m) => {
+      console.log(`✅ MongoDB Connected: ${m.connection.host}`);
+      m.connection.once('open', () => initGridFS());
+      return m;
     });
-    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
-
-    mongoose.connection.once('open', () => {
-      initGridFS();
-    });
-  } catch (error) {
-    console.error('❌ MongoDB connect error:', error?.message || error);
-    const msg = String(error?.message || '');
-    const looksLikeDnsRefused =
-      msg.includes('querySrv') ||
-      msg.includes('queryTxt') ||
-      msg.includes('ENOTFOUND') ||
-      msg.includes('EREFUSED');
-
-    if (isSrv && looksLikeDnsRefused) {
-      console.error(
-        '\nSRV/TXT lookup issue detected.\n' +
-          'Fix:\n' +
-          '  1) DNS change (1.1.1.1 / 8.8.8.8) and flush DNS\n' +
-          '  2) Or use mongodb:// seedlist connection string\n'
-      );
-
-      if (fallbackUri) {
-        console.error('Attempting fallback to MONGO_URI_SEEDLIST...\n');
-        try {
-          const conn2 = await mongoose.connect(fallbackUri, {
-            serverSelectionTimeoutMS: 10000,
-            retryWrites: true,
-          });
-          console.log(`✅ MongoDB Connected via seedlist: ${conn2.connection.host}`);
-          mongoose.connection.once('open', () => initGridFS());
-          return;
-        } catch (e2) {
-          console.error('❌ Fallback (seedlist) also failed:', e2?.message || e2);
-        }
-      } else {
-        console.error('No fallback seedlist provided.');
-      }
-    }
-    process.exit(1);
   }
 
-  mongoose.connection.on('error', (err) => console.error('MongoDB error:', err?.message || err));
-  mongoose.connection.on('disconnected', () => console.warn('MongoDB disconnected.'));
-};
+  cached.conn = await cached.promise;
+  return cached.conn;
+}
+
+mongoose.connection.on('error', (err) => console.error('MongoDB error:', err?.message || err));
+mongoose.connection.on('disconnected', () => console.warn('MongoDB disconnected.'));
 
 module.exports = connectDB;

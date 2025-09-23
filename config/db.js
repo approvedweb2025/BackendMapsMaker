@@ -1,6 +1,7 @@
 // config/db.js
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
+const { initGridFS } = require('./gridfs'); // 🆕 import gridfs.js
 
 // Prefer IPv4 for DNS (prevents some SRV resolution issues)
 try {
@@ -15,7 +16,7 @@ mongoose.set('strictQuery', false); // optional, quiets deprecation warnings
 
 const connectDB = async () => {
   const uri = process.env.MONGO_URI;
-  const fallbackUri = process.env.MONGO_URI_SEEDLIST; // optional standard mongodb:// seedlist
+  const fallbackUri = process.env.MONGO_URI_SEEDLIST; // optional seedlist
 
   if (!uri) {
     console.error('Error: MONGO_URI is not set in your environment.');
@@ -26,18 +27,22 @@ const connectDB = async () => {
 
   try {
     const conn = await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 10000, // 10s
-      // tls: true, // usually automatic with Atlas; enable if you use mongodb:// and get TLS errors
+      serverSelectionTimeoutMS: 10000,
       retryWrites: true,
-      // family: 4, // extra nudge for IPv4-only networks (uncomment if needed)
     });
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+
+    // 🆕 Initialize GridFS after DB connection is open
+    mongoose.connection.once('open', () => {
+      initGridFS();
+    });
+
   } catch (error) {
     console.error('❌ MongoDB connect error:');
     console.error(error?.message || error);
 
-    // If SRV fails due to DNS TXT/SRV refusal, print a targeted hint
+    // If SRV fails due to DNS TXT/SRV refusal
     const msg = String(error?.message || '');
     const looksLikeDnsRefused =
       msg.includes('querySrv') || msg.includes('queryTxt') || msg.includes('ENOTFOUND') || msg.includes('EREFUSED');
@@ -49,22 +54,26 @@ const connectDB = async () => {
         '  2) Or bypass SRV entirely by using a standard mongodb:// seedlist.\n');
 
       if (fallbackUri) {
-        console.error('Attempting fallback to MONGO_URI_SEEDLIST (standard mongodb://)...\n');
+        console.error('Attempting fallback to MONGO_URI_SEEDLIST...\n');
         try {
           const conn2 = await mongoose.connect(fallbackUri, {
             serverSelectionTimeoutMS: 10000,
-            // tls: true, // enable if your seedlist requires TLS flag
             retryWrites: true,
           });
           console.log(`✅ MongoDB Connected via seedlist: ${conn2.connection.host}`);
+
+          // 🆕 Init GridFS for seedlist case
+          mongoose.connection.once('open', () => {
+            initGridFS();
+          });
+
           return;
         } catch (e2) {
           console.error('❌ Fallback (seedlist) also failed:', e2?.message || e2);
         }
       } else {
         console.error(
-          'No fallback seedlist provided. In Atlas, go to "Connect → Drivers → Standard connection string" and set:\n' +
-          'MONGO_URI_SEEDLIST="mongodb://host1,host2,host3/dbName?replicaSet=...&retryWrites=true&w=majority"\n'
+          'No fallback seedlist provided. In Atlas, go to "Connect → Drivers → Standard connection string".\n'
         );
       }
     }

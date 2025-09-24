@@ -33,14 +33,17 @@ app.use(cors({
 
 app.use(cookieParser());
 
+// ✅ Session config for Vercel
+app.set('trust proxy', 1);
 app.use(session({
   secret: process.env.SESSION_SECRET || 'mysecret',
   resave: false,
-  saveUninitialized: false,
+  saveUninitialized: true, 
   cookie: {
-    secure: false,
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000
+    secure: true,           // only HTTPS
+    httpOnly: true,         // not accessible by JS
+    sameSite: 'none',       // allow frontend (different domain) to use cookies
+    maxAge: 24 * 60 * 60 * 1000 // 1 day
   }
 }));
 
@@ -54,6 +57,9 @@ app.use('/uploads', express.static(uploadsDir));
 // ✅ Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
+
+// ✅ Handle favicon requests (prevents 500 error in browser)
+app.get('/favicon.ico', (req, res) => res.status(204));
 
 app.get('/', (req, res) => {
   res.send('<a href="/auth/google">Continue With Google</a>');
@@ -95,8 +101,7 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
-// ❌ Remove app.listen (Vercel doesn’t allow)
-// app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// ❌ No app.listen (not allowed on Vercel)
 
 // ✅ Export for Vercel
 module.exports = app;

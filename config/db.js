@@ -9,29 +9,17 @@ mongoose.set("strictQuery", false);
 let isConnected = null; // cache connection across function calls
 
 const connectDB = async () => {
-  if (isConnected) {
-    // Already connected, reuse it
-    return;
-  }
-
-  const uri = process.env.MONGO_URI;
-
-  if (!uri) {
-    throw new Error("❌ MONGO_URI is not set in environment.");
-  }
-
   try {
-    const conn = await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 10000,
-      retryWrites: true,
+    const conn = await mongoose.connect(process.env.MONGO_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true
     });
-
-    isConnected = conn.connections[0].readyState;
-    console.log(`✅ MongoDB connected: ${conn.connection.host}`);
+    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
-    console.error("❌ MongoDB connection error:", error.message || error);
-    throw error; // don’t exit, just throw
+    console.error('❌ MongoDB connection error:', error.message);
+    process.exit(1);
   }
 };
+
 
 module.exports = connectDB;

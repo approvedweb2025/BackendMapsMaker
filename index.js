@@ -13,11 +13,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ✅ Your routes
+// ✅ API routes
 app.use('/api/users', userRoutes);
 app.use('/api/photos', photoRoutes);
 
-// ❌ DO NOT use app.listen()
-// ✅ Instead export handler
+// ❌ DO NOT use app.listen
+// ✅ Export for Vercel
 module.exports = app;
 module.exports.handler = serverless(app);

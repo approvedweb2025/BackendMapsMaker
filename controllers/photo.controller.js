@@ -112,10 +112,16 @@ const syncImages = async (req, res) => {
       }
     }
 
-    res.redirect(`${process.env.FRONTEND_URL}/home`);
+    // Return JSON response instead of redirect
+    const syncedCount = await Image.countDocuments();
+    res.status(200).json({
+      message: "✅ Sync complete",
+      totalFiles: files.length,
+      totalSynced: syncedCount
+    });
   } catch (err) {
     console.error('❌ Sync error:', err);
-    res.status(500).send('Failed to sync images');
+    res.status(500).json({ error: 'Failed to sync images', details: err.message });
   }
 };
 

@@ -93,7 +93,16 @@ app.get('/auth/google',
 
 // ✅ Fix: Instead of forcing redirect, send JSON to frontend
 app.get('/gtoken',
-  passport.authenticate('google', { failureRedirect: '/' }),
+  passport.authenticate('google', { 
+    failureRedirect: '/',
+    scope: [
+      'profile',
+      'email',
+      'https://www.googleapis.com/auth/drive.readonly'
+    ],
+    accessType: 'offline',
+    prompt: 'consent'
+  }),
   (req, res) => {
     res.json({
       success: true,

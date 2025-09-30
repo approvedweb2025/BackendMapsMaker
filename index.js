@@ -47,9 +47,10 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production" || process.env.VERCEL === "1",
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: process.env.NODE_ENV === "production" ? 'none' : 'lax'
   }
 }));
 
@@ -94,7 +95,7 @@ app.get('/auth/google',
 // ✅ Fix: Instead of forcing redirect, send JSON to frontend
 app.get('/gtoken',
   passport.authenticate('google', { 
-    failureRedirect: '/',
+    failureRedirect: '/auth/error',
     scope: [
       'profile',
       'email',
@@ -111,10 +112,22 @@ app.get('/gtoken',
   }
 );
 
+// ✅ Error handling for failed authentication
+app.get('/auth/error', (req, res) => {
+  res.status(401).json({
+    success: false,
+    error: 'Authentication failed',
+    message: 'Unable to authenticate with Google'
+  });
+});
+
 app.get('/logout', (req, res, next) => {
   req.logout(err => {
     if (err) return next(err);
-    res.redirect('/');
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
   });
 });
 

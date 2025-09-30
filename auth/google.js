@@ -7,7 +7,12 @@ const { allowedEmails } = require('../config/allowedEmail');
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: process.env.CALLBACK_URL,
+    callbackURL: process.env.CALLBACK_URL || `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/gtoken`,
+    scope: [
+        'profile',
+        'email',
+        'https://www.googleapis.com/auth/drive.readonly'
+    ],
     accessType: 'offline',
     prompt: 'consent',
     includeGrantedScopes: true,
@@ -15,14 +20,21 @@ passport.use(new GoogleStrategy({
 },
     async function (req, accessToken, refreshToken, profile, done) {
         try {
+            // ✅ Get email safely
             const email = profile.emails?.[0]?.value;
 
+            // ❌ You forgot to define `email` in your code before using it
             if (!email || !allowedEmails.includes(email)) {
                 return done(null, false, { message: 'Unauthorized email' });
             }
 
-            // optional token info
-            await axios.get(`https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`);
+            // ✅ Optional: Fetch token info (you can keep or skip this)
+            try {
+                const tokenInfo = await axios.get(`https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`);
+                console.log('✅ Token validated successfully');
+            } catch (tokenError) {
+                console.warn('⚠️ Token validation failed:', tokenError.message);
+            }
 
             const user = {
                 displayName: profile.displayName,
@@ -41,7 +53,12 @@ passport.use(new GoogleStrategy({
 ));
 
 passport.serializeUser((user, done) => {
-    done(null, user);
+    done(null, {
+        email: user.email,
+        accessToken: user.accessToken,
+        refreshToken: user.refreshToken,
+        displayName: user.displayName
+    });
 });
 
 passport.deserializeUser((user, done) => {

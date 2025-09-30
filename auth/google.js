@@ -10,6 +10,11 @@ passport.use(new GoogleStrategy({
     callbackURL: process.env.NODE_ENV === 'production' 
       ? `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : process.env.BACKEND_URL}/gtoken`
       : 'http://localhost:4000/gtoken',
+    scope: [
+      'profile',
+      'email',
+      'https://www.googleapis.com/auth/drive.readonly'
+    ],
     accessType: 'offline',
     prompt: 'consent',
     includeGrantedScopes: true,

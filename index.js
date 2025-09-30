@@ -34,7 +34,7 @@ initializeDB();
 
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? [process.env.FRONTEND_URL, process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null].filter(Boolean)
+    ? ['https://maps-maker-frontend-8ntc.vercel.app', process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null].filter(Boolean)
     : 'http://localhost:5173',
   credentials: true,
 }));
@@ -86,7 +86,9 @@ app.get('/auth/google',
 
 app.get('/gtoken',
   passport.authenticate('google', {
-    failureRedirect: `${process.env.FRONTEND_URL}/home`,
+    failureRedirect: process.env.NODE_ENV === 'production' 
+      ? 'https://maps-maker-frontend-8ntc.vercel.app/home'
+      : `${process.env.FRONTEND_URL}/home`,
     successRedirect: '/photos/sync-images',
   })
 );

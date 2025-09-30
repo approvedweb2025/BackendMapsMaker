@@ -20,10 +20,17 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Connect to database only if not in serverless environment
-if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
-  connectDB();
-}
+// Connect to database - handle serverless environment
+const initializeDB = async () => {
+  try {
+    await connectDB();
+  } catch (error) {
+    console.error('Database connection error:', error);
+  }
+};
+
+// Initialize database connection
+initializeDB();
 
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 

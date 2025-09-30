@@ -2,7 +2,7 @@ const axios = require('axios');
 const exifr = require('exifr');
 const Image = require('../models/Image.model');
 
-// ✅ Download file from Google Drive (serverless compatible)
+// ✅ Download file from Google Drive (Vercel compatible)
 const downloadFile = async (fileId, accessToken) => {
   const response = await axios.get(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
@@ -66,7 +66,7 @@ const syncImages = async (req, res) => {
         const exists = await Image.findOne({ fileId: file.id });
         if (exists) continue;
 
-        // ✅ Download file data (serverless compatible - no temp files)
+        // ✅ Download file data (Vercel compatible - no temp files)
         const fileData = await downloadFile(file.id, accessToken);
 
         let latitude = null, longitude = null;
@@ -153,7 +153,7 @@ const getImageStatsByMonth = async (req, res) => {
   }
 };
 
-// ✅ Yearly Stats (year + uploader + count)
+// ✅ Yearly Stats
 const getImageStatsByYear = async (req, res) => {
   try {
     const yearlyStats = await Image.aggregate([
@@ -175,7 +175,7 @@ const getImageStatsByYear = async (req, res) => {
   }
 };
 
-// ✅ Daily Stats (day + uploader + count)
+// ✅ Daily Stats
 const getImageStatsByDay = async (req, res) => {
   try {
     const dailyStats = await Image.aggregate([

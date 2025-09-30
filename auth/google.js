@@ -9,7 +9,7 @@ passport.use(new GoogleStrategy({
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     callbackURL: process.env.NODE_ENV === 'production' 
       ? `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : process.env.BACKEND_URL}/gtoken`
-      : process.env.CALLBACK_URL,
+      : 'http://localhost:4000/gtoken',
     accessType: 'offline',
     prompt: 'consent',
     includeGrantedScopes: true,

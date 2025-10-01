@@ -158,8 +158,23 @@ const getPhotoMeta = async (req, res) => {
 
 // ✅ Sync Google Drive images → DB (Vercel compatible)
 const syncImages = async (req, res) => {
-  if (!req.isAuthenticated()) return res.status(401).send('Not authenticated');
-  const accessToken = req.user.accessToken;
+  // In serverless (Vercel), sessions may not persist. Allow token via header/query/body.
+  let accessToken = null;
+  if (req.isAuthenticated && req.isAuthenticated()) {
+    accessToken = req.user?.accessToken;
+  }
+  if (!accessToken) {
+    const authHeader = req.headers.authorization || '';
+    if (authHeader.startsWith('Bearer ')) {
+      accessToken = authHeader.substring('Bearer '.length);
+    }
+  }
+  if (!accessToken) {
+    accessToken = req.query.accessToken || req.body?.accessToken || null;
+  }
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated. Provide Google accessToken via Authorization: Bearer <token> or ?accessToken=...' });
+  }
 
   try {
     let files = [];
@@ -225,7 +240,7 @@ const syncImages = async (req, res) => {
           latitude,
           longitude,
           timestamp,
-          uploadedBy: req.user.email,
+          uploadedBy: (req.user && req.user.email) || 'google-drive',
           lastCheckedAt: new Date(),
           googleDriveUrl: `https://drive.google.com/file/d/${file.id}/view`, // Direct Google Drive link
           ...placeDetails

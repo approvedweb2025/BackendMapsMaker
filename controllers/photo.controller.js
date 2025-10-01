@@ -181,10 +181,14 @@ const syncImages = async (req, res) => {
 
     console.log(`✅ Total files fetched: ${files.length}`);
 
+    let syncedCount = 0;
+    let skippedExisting = 0;
+    let failedCount = 0;
+
     for (const file of files) {
       try {
         const exists = await Image.findOne({ fileId: file.id });
-        if (exists) continue;
+        if (exists) { skippedExisting += 1; continue; }
 
         // ✅ Download file data (serverless compatible - no temp files)
         const fileData = await downloadFile(file.id, accessToken);
@@ -226,13 +230,20 @@ const syncImages = async (req, res) => {
           googleDriveUrl: `https://drive.google.com/file/d/${file.id}/view`, // Direct Google Drive link
           ...placeDetails
         });
+        syncedCount += 1;
 
       } catch (fileErr) {
         console.error(`❌ Error processing file ${file.name}:`, fileErr);
+        failedCount += 1;
       }
     }
 
-    res.redirect(`${process.env.FRONTEND_URL}/home`);
+    const result = { success: true, total: files.length, synced: syncedCount, skipped: skippedExisting, failed: failedCount };
+    // Optional redirect via query: /photos/sync-images?redirect=1
+    if (req.query.redirect === '1' && process.env.FRONTEND_URL) {
+      return res.redirect(`${process.env.FRONTEND_URL}/home`);
+    }
+    return res.status(200).json(result);
   } catch (err) {
     console.error('❌ Sync error:', err);
     res.status(500).send('Failed to sync images');

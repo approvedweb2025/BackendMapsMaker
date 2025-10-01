@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const imageSchema = new mongoose.Schema({
   ImageURL: { type: String, default: null },
   fileId: { type: String, unique: true, required: true },
+  driveFileId: { type: String, default: null },
   name: String,
   mimeType: String,
   latitude: Number,

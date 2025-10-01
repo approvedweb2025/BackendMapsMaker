@@ -3,6 +3,31 @@ const exifr = require('exifr');
 const mongoose = require('mongoose');
 const Image = require('../models/Image.model');
 const { uploadBufferToGridFS, openDownloadStreamById } = require('../config/gridfs');
+const cloudinary = require('cloudinary').v2;
+
+// ✅ Configure Cloudinary
+if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+  });
+}
+
+// ✅ Upload buffer to Cloudinary
+const uploadBufferToCloudinary = async (buffer, filename) => {
+  if (!cloudinary.config().cloud_name) return null;
+  return await new Promise((resolve, reject) => {
+    const upload = cloudinary.uploader.upload_stream(
+      { folder: 'maps-maker', public_id: filename ? filename.split('.').slice(0, -1).join('.') : undefined, resource_type: 'image' },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+    upload.end(buffer);
+  });
+};
 
 // ✅ Download file from Google Drive (serverless compatible)
 const downloadFile = async (fileId, accessToken) => {
@@ -76,19 +101,32 @@ const uploadPhoto = async (req, res) => {
       placeDetails = await getPlaceDetails(latitude, longitude);
     }
 
-    // Upload binary to GridFS
-    const fileId = await uploadBufferToGridFS({
-      filename: originalName,
-      contentType: mimeType,
-      buffer: fileBuffer,
-      metadata: {
-        uploadedBy: req.user?.email || 'anonymous',
-      }
-    });
+    // Upload to Cloudinary
+    let cloudResult = null;
+    try {
+      cloudResult = await uploadBufferToCloudinary(fileBuffer, originalName);
+    } catch (e) {
+      console.warn('Cloudinary upload failed:', e?.message || e);
+    }
+
+    // Upload binary to GridFS (optional redundancy)
+    let fileId = null;
+    try {
+      fileId = await uploadBufferToGridFS({
+        filename: originalName,
+        contentType: mimeType,
+        buffer: fileBuffer,
+        metadata: {
+          uploadedBy: req.user?.email || 'anonymous',
+        }
+      });
+    } catch (e) {
+      console.warn('GridFS upload failed:', e?.message || e);
+    }
 
     // Persist metadata
     const doc = await Image.create({
-      fileId: String(fileId),
+      fileId: fileId ? String(fileId) : undefined,
       name: originalName,
       mimeType,
       latitude,
@@ -96,6 +134,7 @@ const uploadPhoto = async (req, res) => {
       uploadedBy: req.user?.email || 'anonymous',
       timestamp,
       lastCheckedAt: new Date(),
+      cloudinaryUrl: cloudResult?.secure_url || null,
       ...placeDetails
     });
 
@@ -234,7 +273,15 @@ const syncImages = async (req, res) => {
           placeDetails = await getPlaceDetails(latitude, longitude);
         }
 
-        // 🟢 Store bytes in GridFS so we can stream reliably
+        // 🟢 Upload to Cloudinary for CDN access
+        let cloudResult = null;
+        try {
+          cloudResult = await uploadBufferToCloudinary(Buffer.from(fileData), file.name);
+        } catch (e) {
+          console.warn(`⚠️ Cloudinary upload failed for ${file.name}:`, e?.message || e);
+        }
+
+        // 🟢 Store bytes in GridFS so we can stream reliably (optional)
         let gridfsId = null;
         try {
           gridfsId = await uploadBufferToGridFS({
@@ -258,6 +305,7 @@ const syncImages = async (req, res) => {
           uploadedBy: (req.user && req.user.email) || 'google-drive',
           lastCheckedAt: new Date(),
           googleDriveUrl: `https://drive.google.com/file/d/${file.id}/view`,
+          cloudinaryUrl: cloudResult?.secure_url || null,
           ...placeDetails
         });
         syncedCount += 1;
@@ -309,6 +357,13 @@ const migrateDriveToGridFS = async (req, res) => {
 
       try {
         const data = await downloadFile(driveId, accessToken);
+        // Upload to Cloudinary as well
+        let cloudResult = null;
+        try {
+          cloudResult = await uploadBufferToCloudinary(Buffer.from(data), img.name || `${driveId}.jpg`);
+        } catch (e) {
+          console.warn('Cloudinary upload during migration failed:', e?.message || e);
+        }
         const gridId = await uploadBufferToGridFS({
           filename: img.name || `${driveId}.jpg`,
           contentType: img.mimeType || 'image/jpeg',
@@ -318,6 +373,7 @@ const migrateDriveToGridFS = async (req, res) => {
 
         img.driveFileId = driveId;
         img.fileId = String(gridId);
+        if (cloudResult?.secure_url) img.cloudinaryUrl = cloudResult.secure_url;
         await img.save();
         migrated += 1;
       } catch (e) {

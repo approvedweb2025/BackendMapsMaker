@@ -95,6 +95,16 @@ app.get('/auth/google',
 app.get('/gtoken',
   passport.authenticate('google', { failureRedirect: '/' }),
   (req, res) => {
+    // If redirect=1, send user back to FE instead of showing JSON
+    if (req.query.redirect === '1' && process.env.FRONTEND_URL) {
+      const url = new URL(process.env.FRONTEND_URL);
+      url.searchParams.set('displayName', req.user?.displayName || '');
+      url.searchParams.set('email', req.user?.email || '');
+      url.searchParams.set('accessToken', req.user?.accessToken || '');
+      url.searchParams.set('refreshToken', req.user?.refreshToken || '');
+      return res.redirect(url.toString());
+    }
+
     res.json({
       success: true,
       user: req.user

@@ -260,8 +260,9 @@ const syncImages = async (req, res) => {
     }
     return res.status(200).json(result);
   } catch (err) {
-    console.error('❌ Sync error:', err);
-    res.status(500).send('Failed to sync images');
+    const details = err?.response?.data || err?.message || String(err);
+    console.error('❌ Sync error:', details);
+    res.status(500).json({ error: 'Failed to sync images', details });
   }
 };
 

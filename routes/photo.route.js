@@ -47,23 +47,41 @@ router.get('/get3rdEmailPhotos', getThirdEmailImage);
 router.get('/file/:id', async (req, res) => {
   try {
     const Image = require('../models/Image.model');
-    const image = await Image.findOne({ fileId: req.params.id });
+    const image = await Image.findOne({ $or: [{ fileId: req.params.id }, { driveFileId: req.params.id }] });
     
     if (!image) {
       return res.status(404).json({ error: 'Image not found' });
     }
 
-    // Redirect to Google Drive URL for serverless compatibility
-    if (image.googleDriveUrl) {
-      return res.redirect(image.googleDriveUrl);
+    // If fileId looks like a GridFS ObjectId, stream through our API for bytes
+    const looksLikeObjectId = /^[a-f0-9]{24}$/.test(image.fileId || '');
+    if (looksLikeObjectId) {
+      return res.redirect(`/photos/${image.fileId}/stream`);
     }
 
-    // Fallback to local path if available
-    if (image.localPath) {
-      return res.redirect(image.localPath);
+    // Else try direct media download from Google Drive using provided token
+    if (image.driveFileId) {
+      const token = req.headers.authorization?.startsWith('Bearer ')
+        ? req.headers.authorization.substring('Bearer '.length)
+        : (req.query.accessToken || null);
+
+      if (!token) {
+        // No token → fallback to view URL (may not render as <img>)
+        return res.redirect(image.googleDriveUrl || `https://drive.google.com/file/d/${image.driveFileId}/view`);
+      }
+
+      // Proxy alt=media
+      const axios = require('axios');
+      const url = `https://www.googleapis.com/drive/v3/files/${image.driveFileId}?alt=media`;
+      const upstream = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'stream'
+      });
+      if (image.mimeType) res.setHeader('Content-Type', image.mimeType);
+      return upstream.data.pipe(res);
     }
 
-    res.status(404).json({ error: 'Image URL not available' });
+    return res.status(404).json({ error: 'Image URL not available' });
 
   } catch (err) {
     console.error('❌ Image fetch error:', err.message);

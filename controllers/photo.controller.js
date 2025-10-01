@@ -202,7 +202,8 @@ const syncImages = async (req, res) => {
 
     for (const file of files) {
       try {
-        const exists = await Image.findOne({ fileId: file.id });
+        // Treat previously-synced docs that used Drive id as fileId as existing
+        const exists = await Image.findOne({ $or: [{ fileId: file.id }, { driveFileId: file.id }] });
         if (exists) { skippedExisting += 1; continue; }
 
         // ✅ Download file data (serverless compatible - no temp files)
@@ -233,8 +234,22 @@ const syncImages = async (req, res) => {
           placeDetails = await getPlaceDetails(latitude, longitude);
         }
 
+        // 🟢 Store bytes in GridFS so we can stream reliably
+        let gridfsId = null;
+        try {
+          gridfsId = await uploadBufferToGridFS({
+            filename: file.name,
+            contentType: file.mimeType,
+            buffer: Buffer.from(fileData),
+            metadata: { source: 'google-drive', driveFileId: file.id }
+          });
+        } catch (upErr) {
+          console.warn(`⚠️ GridFS upload failed for ${file.name}:`, upErr?.message || upErr);
+        }
+
         await Image.create({
-          fileId: file.id,
+          fileId: gridfsId ? String(gridfsId) : file.id,
+          driveFileId: file.id,
           name: file.name,
           mimeType: file.mimeType,
           latitude,
@@ -242,7 +257,7 @@ const syncImages = async (req, res) => {
           timestamp,
           uploadedBy: (req.user && req.user.email) || 'google-drive',
           lastCheckedAt: new Date(),
-          googleDriveUrl: `https://drive.google.com/file/d/${file.id}/view`, // Direct Google Drive link
+          googleDriveUrl: `https://drive.google.com/file/d/${file.id}/view`,
           ...placeDetails
         });
         syncedCount += 1;

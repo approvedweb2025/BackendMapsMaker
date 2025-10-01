@@ -41,6 +41,9 @@ const getPlaceDetails = async (lat, lng) => {
 // ✅ Upload a single image, save binary in GridFS and metadata in Images collection
 const uploadPhoto = async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: 'Database not connected' });
+    }
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
@@ -106,6 +109,9 @@ const uploadPhoto = async (req, res) => {
 // ✅ Stream image by id from GridFS
 const streamPhoto = async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: 'Database not connected' });
+    }
     const { id } = req.params;
     // Accept either ObjectId string for GridFS or Image.fileId stored as string
     let objectId;

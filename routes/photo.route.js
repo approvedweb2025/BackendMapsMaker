@@ -11,6 +11,7 @@ const {
   getImageStatsByMonth,
   syncImages,
   getPhotos,
+  migrateDriveToGridFS,
   getImagesByUploadedBy,
   getFirstEmailImage,
   getSecondEmailImage,
@@ -19,6 +20,8 @@ const {
 
 // ✅ SYNC IMAGES AND SAVE IN DB (GridFS + Metadata)
 router.get('/sync-images', syncImages);
+// ✅ Migrate legacy Drive-only entries into GridFS
+router.post('/migrate-drive-to-gridfs', migrateDriveToGridFS);
 
 // ✅ Upload image (multipart/form-data field: file)
 router.post('/upload', upload.single('file'), uploadPhoto);

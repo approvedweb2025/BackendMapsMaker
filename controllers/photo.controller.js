@@ -281,6 +281,57 @@ const syncImages = async (req, res) => {
   }
 };
 
+// ✅ Migrate legacy Drive-only records into GridFS (requires Google access token)
+const migrateDriveToGridFS = async (req, res) => {
+  // Accept accessToken via header/query/body
+  let accessToken = null;
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    accessToken = authHeader.substring('Bearer '.length);
+  }
+  if (!accessToken) accessToken = req.query.accessToken || req.body?.accessToken || null;
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Provide Google accessToken via Authorization: Bearer <token> or ?accessToken=...' });
+  }
+
+  try {
+    // Find images whose fileId is not a valid ObjectId (likely Drive ids)
+    const notObjectId = { $not: { $regex: /^[a-f0-9]{24}$/ } };
+    const candidates = await Image.find({ fileId: notObjectId });
+
+    let migrated = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const img of candidates) {
+      const driveId = img.driveFileId || img.fileId;
+      if (!driveId) { skipped += 1; continue; }
+
+      try {
+        const data = await downloadFile(driveId, accessToken);
+        const gridId = await uploadBufferToGridFS({
+          filename: img.name || `${driveId}.jpg`,
+          contentType: img.mimeType || 'image/jpeg',
+          buffer: Buffer.from(data),
+          metadata: { source: 'migration', driveFileId: driveId }
+        });
+
+        img.driveFileId = driveId;
+        img.fileId = String(gridId);
+        await img.save();
+        migrated += 1;
+      } catch (e) {
+        failed += 1;
+      }
+    }
+
+    return res.status(200).json({ success: true, migrated, skipped, failed, total: candidates.length });
+  } catch (err) {
+    const details = err?.message || String(err);
+    return res.status(500).json({ error: 'Migration failed', details });
+  }
+};
+
 // ✅ Get all photos
 const getPhotos = async (req, res) => {
   try {
@@ -405,6 +456,7 @@ module.exports = {
   streamPhoto,
   getPhotoMeta,
   syncImages,
+  migrateDriveToGridFS,
   getPhotos,
   getImageStatsByMonth,
   getImageStatsByYear,

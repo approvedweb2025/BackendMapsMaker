@@ -65,8 +65,21 @@ app.use('/uploads', express.static(uploadsDir));
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
+// ✅ Backward/alternative prefix: support clients calling /api/*
+app.use('/api/users', userRoutes);
+app.use('/api/photos', photoRoutes);
+
 // Health check route
 app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Mirror health under /api for convenience
+app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),

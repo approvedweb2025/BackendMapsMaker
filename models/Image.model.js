@@ -11,6 +11,7 @@ const imageSchema = new mongoose.Schema({
   uploadedBy: String,
   localPath: String,   // ✅ legacy field
   googleDriveUrl: String, // ✅ new field for serverless
+  cloudinaryUrl: String,
   lastCheckedAt: { type: Date, default: null },
   district: String,
   village: String,

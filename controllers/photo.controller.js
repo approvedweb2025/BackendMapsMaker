@@ -587,13 +587,13 @@ const getFirstEmailImage = async (req, res) => {
         };
       });
       
-      return res.status(200).json(mergedImages);
+      return res.status(200).json({ photos: mergedImages });
     }
     
     // Fallback to database only
     const email = 'mhuzaifa8519@gmail.com';
     const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
-    res.status(200).json(images);
+    res.status(200).json({ photos: images });
   } catch (err) {
     console.error('Error fetching first email images:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -626,13 +626,13 @@ const getSecondEmailImage = async (req, res) => {
         };
       });
       
-      return res.status(200).json(mergedImages);
+      return res.status(200).json({ photos: mergedImages });
     }
     
     // Fallback to database only
     const email = 'mhuzaifa86797@gmail.com';
     const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
-    res.status(200).json(images);
+    res.status(200).json({ photos: images });
   } catch (err) {
     console.error('Error fetching second email images:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -665,13 +665,13 @@ const getThirdEmailImage = async (req, res) => {
         };
       });
       
-      return res.status(200).json(mergedImages);
+      return res.status(200).json({ photos: mergedImages });
     }
     
     // Fallback to database only
     const email = 'muhammadjig8@gmail.com';
     const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
-    res.status(200).json(images);
+    res.status(200).json({ photos: images });
   } catch (err) {
     console.error('Error fetching third email images:', err);
     res.status(500).json({ error: 'Internal server error' });

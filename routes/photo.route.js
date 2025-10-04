@@ -9,6 +9,7 @@ const {
   streamPhoto,
   getPhotoMeta,
   getImageStatsByMonth,
+  getImageStatsByDay,
   syncImages,
   getPhotos,
   migrateDriveToGridFS,
@@ -40,6 +41,9 @@ router.get('/get-photos', getPhotos);
 
 // ✅ GET IMAGE STATS BY MONTH
 router.get('/get-image-by-month', getImageStatsByMonth);
+
+// ✅ GET IMAGE STATS BY DAY
+router.get('/get-image-by-day', getImageStatsByDay);
 
 // ✅ GET IMAGES BY UPLOADER EMAIL
 router.get('/getImages/:uploadedBy', getImagesByUploadedBy);

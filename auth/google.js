@@ -4,15 +4,17 @@ require('dotenv').config();
 const axios = require('axios');
 const { allowedEmails } = require('../config/allowedEmail');
 
-passport.use(new GoogleStrategy({
-    clientID: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: process.env.CALLBACK_URL,
-    accessType: 'offline',
-    prompt: 'consent',
-    includeGrantedScopes: true,
-    passReqToCallback: true
-},
+// Only initialize Google OAuth if credentials are provided
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  passport.use(new GoogleStrategy({
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: process.env.CALLBACK_URL,
+      accessType: 'offline',
+      prompt: 'consent',
+      includeGrantedScopes: true,
+      passReqToCallback: true
+  },
     async function (req, accessToken, refreshToken, profile, done) {
         try {
             const email = profile.emails?.[0]?.value;
@@ -38,7 +40,10 @@ passport.use(new GoogleStrategy({
             return done(error);
         }
     }
-));
+  ));
+} else {
+  console.log('⚠️ Google OAuth credentials not provided, skipping Google authentication setup');
+}
 
 passport.serializeUser((user, done) => {
     done(null, user);

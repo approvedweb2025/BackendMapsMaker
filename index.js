@@ -79,6 +79,7 @@ app.get('/health', (req, res) => {
 app.get('/api/health', async (req, res) => {
   try {
     const Image = require('./models/Image.model.js');
+    const cloudinary = require('cloudinary').v2;
     
     // Test database connection
     const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
@@ -87,6 +88,23 @@ app.get('/api/health', async (req, res) => {
     const firstEmailCount = await Image.countDocuments({ uploadedBy: 'mhuzaifa8519@gmail.com' });
     const secondEmailCount = await Image.countDocuments({ uploadedBy: 'mhuzaifa86797@gmail.com' });
     const thirdEmailCount = await Image.countDocuments({ uploadedBy: 'muhammadjig8@gmail.com' });
+    
+    // Test Cloudinary folder structure
+    let cloudinaryFolders = {};
+    if (process.env.CLOUDINARY_CLOUD_NAME) {
+      try {
+        const folders = ['first-email', 'second-email', 'third-email'];
+        for (const folder of folders) {
+          const result = await cloudinary.search
+            .expression(`folder:maps-maker/${folder}`)
+            .max_results(1)
+            .execute();
+          cloudinaryFolders[folder] = result.total_count || 0;
+        }
+      } catch (err) {
+        cloudinaryFolders = { error: 'Failed to fetch folder info' };
+      }
+    }
     
     res.json({
       status: 'OK',
@@ -97,6 +115,7 @@ app.get('/api/health', async (req, res) => {
         thirdEmail: thirdEmailCount
       },
       cloudinary: process.env.CLOUDINARY_CLOUD_NAME ? 'configured' : 'not configured',
+      cloudinaryFolders,
       timestamp: new Date().toISOString()
     });
   } catch (err) {

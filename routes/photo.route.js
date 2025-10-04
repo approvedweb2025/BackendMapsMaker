@@ -54,6 +54,18 @@ router.post('/create-folders', async (req, res) => {
   }
 });
 
+// ✅ Create Cloudinary folders (simple approach)
+router.post('/create-folders-simple', async (req, res) => {
+  try {
+    const { createFoldersSimple } = require('../createFoldersSimple');
+    await createFoldersSimple();
+    res.status(200).json({ message: 'Folders created successfully using simple approach' });
+  } catch (err) {
+    console.error('Create folders simple error:', err);
+    res.status(500).json({ error: 'Create folders simple failed', details: err.message });
+  }
+});
+
 // ✅ Upload image (multipart/form-data field: file)
 router.post('/upload', upload.single('file'), uploadPhoto);
 

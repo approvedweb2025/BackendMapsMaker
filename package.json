@@ -6,6 +6,7 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "organize": "node runOrganization.js",
+    "create-folders": "node createFolders.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

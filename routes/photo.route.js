@@ -27,6 +27,21 @@ router.post('/migrate-drive-to-gridfs', migrateDriveToGridFS);
 // ✅ Migrate existing images to Cloudinary folders
 router.post('/migrate-to-cloudinary-folders', migrateToCloudinaryFolders);
 
+// ✅ Organize Cloudinary images into folders and update database
+router.post('/organize-cloudinary-images', async (req, res) => {
+  try {
+    const { organizeCloudinaryImages } = require('../organizeCloudinaryImages');
+    const result = await organizeCloudinaryImages();
+    res.status(200).json({
+      message: 'Cloudinary images organized successfully',
+      ...result
+    });
+  } catch (err) {
+    console.error('Organization error:', err);
+    res.status(500).json({ error: 'Organization failed', details: err.message });
+  }
+});
+
 // ✅ Upload image (multipart/form-data field: file)
 router.post('/upload', upload.single('file'), uploadPhoto);
 

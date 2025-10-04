@@ -482,7 +482,8 @@ const getFirstEmailImage = async (req, res) => {
     const email = 'mhuzaifa8519@gmail.com';
     const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
     res.status(200).json(images);
-  } catch {
+  } catch (err) {
+    console.error('Error fetching first email images:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -492,7 +493,8 @@ const getSecondEmailImage = async (req, res) => {
     const email = 'mhuzaifa86797@gmail.com';
     const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
     res.status(200).json(images);
-  } catch {
+  } catch (err) {
+    console.error('Error fetching second email images:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -502,7 +504,8 @@ const getThirdEmailImage = async (req, res) => {
     const email = 'muhammadjig8@gmail.com';
     const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
     res.status(200).json(images);
-  } catch {
+  } catch (err) {
+    console.error('Error fetching third email images:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

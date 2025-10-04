@@ -189,6 +189,46 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
+// ✅ Test all email endpoints
+app.get('/api/test-endpoints', async (req, res) => {
+  try {
+    const results = {};
+    
+    // Test each email endpoint
+    const endpoints = [
+      { name: 'firstEmail', url: '/photos/get1stEmailPhotos' },
+      { name: 'secondEmail', url: '/photos/get2ndEmailPhotos' },
+      { name: 'thirdEmail', url: '/photos/get3rdEmailPhotos' },
+      { name: 'getImages', url: '/photos/getImages/mhuzaifa8519@gmail.com' },
+      { name: 'getPhotos', url: '/photos/get-photos' }
+    ];
+    
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(`http://localhost:${PORT}${endpoint.url}`);
+        const data = await response.json();
+        results[endpoint.name] = {
+          status: response.status,
+          count: Array.isArray(data) ? data.length : (data.photos ? data.photos.length : 0),
+          hasCloudinaryUrls: Array.isArray(data) 
+            ? data.some(img => img.cloudinaryUrl) 
+            : (data.photos ? data.photos.some(img => img.cloudinaryUrl) : false)
+        };
+      } catch (err) {
+        results[endpoint.name] = { error: err.message };
+      }
+    }
+    
+    res.json({
+      status: 'Test completed',
+      results,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Test failed', details: err.message });
+  }
+});
+
 // ✅ Catch-all
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });

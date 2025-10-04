@@ -12,6 +12,7 @@ const {
   syncImages,
   getPhotos,
   migrateDriveToGridFS,
+  migrateToCloudinaryFolders,
   getImagesByUploadedBy,
   getFirstEmailImage,
   getSecondEmailImage,
@@ -22,6 +23,8 @@ const {
 router.get('/sync-images', syncImages);
 // ✅ Migrate legacy Drive-only entries into GridFS
 router.post('/migrate-drive-to-gridfs', migrateDriveToGridFS);
+// ✅ Migrate existing images to Cloudinary folders
+router.post('/migrate-to-cloudinary-folders', migrateToCloudinaryFolders);
 
 // ✅ Upload image (multipart/form-data field: file)
 router.post('/upload', upload.single('file'), uploadPhoto);
@@ -45,6 +48,37 @@ router.get('/getImages/:uploadedBy', getImagesByUploadedBy);
 router.get('/get1stEmailPhotos', getFirstEmailImage);
 router.get('/get2ndEmailPhotos', getSecondEmailImage);
 router.get('/get3rdEmailPhotos', getThirdEmailImage);
+
+// ✅ NEW: Get images from Cloudinary folders
+router.get('/getCloudinaryFolder/:folderName', async (req, res) => {
+  try {
+    const { folderName } = req.params;
+    const cloudinary = require('cloudinary').v2;
+    
+    if (!cloudinary.config().cloud_name) {
+      return res.status(500).json({ error: 'Cloudinary not configured' });
+    }
+    
+    const result = await cloudinary.search
+      .expression(`folder:maps-maker/${folderName}`)
+      .sort_by([['created_at', 'desc']])
+      .max_results(500)
+      .execute();
+    
+    const images = result.resources.map(resource => ({
+      fileId: resource.public_id,
+      cloudinaryUrl: resource.secure_url,
+      name: resource.public_id.split('/').pop(),
+      timestamp: new Date(resource.created_at),
+      folder: folderName
+    }));
+    
+    res.status(200).json(images);
+  } catch (err) {
+    console.error('Error fetching Cloudinary folder images:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // ✅ SERVE IMAGE FROM GOOGLE DRIVE BY FILE ID
 router.get('/file/:id', async (req, res) => {

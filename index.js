@@ -31,8 +31,9 @@ if (process.env.VERCEL !== '1' && !fs.existsSync(uploadsDir)) {
 // ✅ Allowed Origins for CORS
 const allowedOrigins = [
   "http://localhost:5173",
-  "https://maps-maker-frontend-8ntc.vercel.app"
-];
+  "https://maps-maker-frontend-8ntc.vercel.app",
+  process.env.FRONTEND_URL
+].filter(Boolean); // Remove undefined values
 
 app.use(cors({
   origin: allowedOrigins,
@@ -72,6 +73,39 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
   });
+});
+
+// API health check route
+app.get('/api/health', async (req, res) => {
+  try {
+    const Image = require('./models/Image.model.js');
+    
+    // Test database connection
+    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+    
+    // Test email endpoints
+    const firstEmailCount = await Image.countDocuments({ uploadedBy: 'mhuzaifa8519@gmail.com' });
+    const secondEmailCount = await Image.countDocuments({ uploadedBy: 'mhuzaifa86797@gmail.com' });
+    const thirdEmailCount = await Image.countDocuments({ uploadedBy: 'muhammadjig8@gmail.com' });
+    
+    res.json({
+      status: 'OK',
+      database: dbStatus,
+      emailCounts: {
+        firstEmail: firstEmailCount,
+        secondEmail: secondEmailCount,
+        thirdEmail: thirdEmailCount
+      },
+      cloudinary: process.env.CLOUDINARY_CLOUD_NAME ? 'configured' : 'not configured',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: 'ERROR',
+      error: err.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Google Auth routes

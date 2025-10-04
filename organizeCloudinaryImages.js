@@ -155,34 +155,59 @@ const getImagesFromCloudinaryFolder = async (folderName) => {
   }
 };
 
-// Function to create folders if they don't exist
+// Function to create folders by moving existing images
 const createCloudinaryFolders = async () => {
   try {
-    console.log('🔄 Creating Cloudinary folders...');
+    console.log('🔄 Creating Cloudinary folders by organizing existing images...');
     
+    // First, get all images from the general folder
+    const generalImages = await cloudinary.search
+      .expression('folder:maps-maker/general')
+      .sort_by([['created_at', 'desc']])
+      .max_results(500)
+      .execute();
+    
+    console.log(`📊 Found ${generalImages.resources.length} images in general folder`);
+    
+    if (generalImages.resources.length === 0) {
+      console.log('⚠️  No images found in general folder. Please upload some images first.');
+      return;
+    }
+    
+    // Process each email/folder
     for (const [email, folderName] of Object.entries(emailMappings)) {
-      // Check if folder exists by searching for images in it
-      const result = await cloudinary.search
-        .expression(`folder:maps-maker/${folderName}`)
-        .max_results(1)
-        .execute();
+      console.log(`\n🔄 Processing ${email} -> ${folderName} folder...`);
       
-      if (result.resources.length === 0) {
-        console.log(`📁 Creating folder: maps-maker/${folderName}`);
-        // Upload a placeholder image to create the folder
-        const placeholderResult = await cloudinary.uploader.upload(
-          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
-          {
-            folder: `maps-maker/${folderName}`,
-            public_id: `${folderName}_placeholder`,
-            resource_type: 'image'
-          }
-        );
-        console.log(`✅ Created folder: maps-maker/${folderName}`);
-      } else {
-        console.log(`✅ Folder already exists: maps-maker/${folderName}`);
+      // Find images that belong to this email (we'll need to check database or use naming convention)
+      const emailImages = generalImages.resources.filter(resource => {
+        // Check if the image name or metadata contains the email
+        const name = resource.public_id.toLowerCase();
+        return name.includes(email.split('@')[0]) || 
+               name.includes(folderName) ||
+               name.includes('second') && folderName === 'second-email' ||
+               name.includes('third') && folderName === 'third-email' ||
+               name.includes('first') && folderName === 'first-email';
+      });
+      
+      console.log(`📊 Found ${emailImages.length} images for ${email}`);
+      
+      // Move each image to the correct folder
+      for (const resource of emailImages) {
+        try {
+          const currentPublicId = resource.public_id;
+          const newPublicId = `maps-maker/${folderName}/${resource.public_id.split('/').pop()}`;
+          
+          // Rename (move) the image to the new folder
+          await cloudinary.uploader.rename(currentPublicId, newPublicId);
+          console.log(`✅ Moved: ${currentPublicId} -> ${newPublicId}`);
+        } catch (moveError) {
+          console.error(`❌ Error moving ${resource.public_id}:`, moveError.message);
+        }
       }
     }
+    
+    console.log('\n✅ Folder organization completed!');
+    
   } catch (error) {
     console.error('❌ Error creating folders:', error);
     throw error;

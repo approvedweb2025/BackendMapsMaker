@@ -14,12 +14,27 @@ if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && proce
   });
 }
 
-// ✅ Upload buffer to Cloudinary
-const uploadBufferToCloudinary = async (buffer, filename) => {
+// ✅ Upload buffer to Cloudinary with email-specific folder
+const uploadBufferToCloudinary = async (buffer, filename, uploadedBy = 'anonymous') => {
   if (!cloudinary.config().cloud_name) return null;
+  
+  // Create folder name based on email
+  let folderName = 'general';
+  if (uploadedBy === 'mhuzaifa8519@gmail.com') {
+    folderName = 'first-email';
+  } else if (uploadedBy === 'mhuzaifa86797@gmail.com') {
+    folderName = 'second-email';
+  } else if (uploadedBy === 'muhammadjig8@gmail.com') {
+    folderName = 'third-email';
+  }
+  
   return await new Promise((resolve, reject) => {
     const upload = cloudinary.uploader.upload_stream(
-      { folder: 'maps-maker', public_id: filename ? filename.split('.').slice(0, -1).join('.') : undefined, resource_type: 'image' },
+      { 
+        folder: `maps-maker/${folderName}`, 
+        public_id: filename ? `${folderName}_${Date.now()}_${filename.split('.').slice(0, -1).join('.')}` : undefined, 
+        resource_type: 'image' 
+      },
       (error, result) => {
         if (error) return reject(error);
         resolve(result);
@@ -104,7 +119,7 @@ const uploadPhoto = async (req, res) => {
     // Upload to Cloudinary
     let cloudResult = null;
     try {
-      cloudResult = await uploadBufferToCloudinary(fileBuffer, originalName);
+      cloudResult = await uploadBufferToCloudinary(fileBuffer, originalName, req.user?.email || 'anonymous');
     } catch (e) {
       console.warn('Cloudinary upload failed:', e?.message || e);
     }
@@ -276,7 +291,7 @@ const syncImages = async (req, res) => {
         // 🟢 Upload to Cloudinary for CDN access
         let cloudResult = null;
         try {
-          cloudResult = await uploadBufferToCloudinary(Buffer.from(fileData), file.name);
+          cloudResult = await uploadBufferToCloudinary(Buffer.from(fileData), file.name, 'google-drive');
         } catch (e) {
           console.warn(`⚠️ Cloudinary upload failed for ${file.name}:`, e?.message || e);
         }
@@ -360,7 +375,7 @@ const migrateDriveToGridFS = async (req, res) => {
         // Upload to Cloudinary as well
         let cloudResult = null;
         try {
-          cloudResult = await uploadBufferToCloudinary(Buffer.from(data), img.name || `${driveId}.jpg`);
+          cloudResult = await uploadBufferToCloudinary(Buffer.from(data), img.name || `${driveId}.jpg`, img.uploadedBy || 'migration');
         } catch (e) {
           console.warn('Cloudinary upload during migration failed:', e?.message || e);
         }
@@ -470,15 +485,112 @@ const getImageStatsByDay = async (req, res) => {
 const getImagesByUploadedBy = async (req, res) => {
   try {
     const { uploadedBy } = req.params;
+    
+    // Determine folder name based on email
+    let folderName = 'general';
+    if (uploadedBy === 'mhuzaifa8519@gmail.com') {
+      folderName = 'first-email';
+    } else if (uploadedBy === 'mhuzaifa86797@gmail.com') {
+      folderName = 'second-email';
+    } else if (uploadedBy === 'muhammadjig8@gmail.com') {
+      folderName = 'third-email';
+    }
+    
+    // First try to get from Cloudinary folder
+    const cloudinaryImages = await getImagesFromCloudinaryFolder(folderName);
+    
+    if (cloudinaryImages && cloudinaryImages.length > 0) {
+      // Get additional metadata from database for images that have GPS data
+      const dbImages = await Image.find({ uploadedBy, longitude: { $ne: null }, latitude: { $ne: null } });
+      
+      // Merge Cloudinary images with database metadata
+      const mergedImages = cloudinaryImages.map(cloudImg => {
+        const dbImg = dbImages.find(db => db.cloudinaryUrl === cloudImg.cloudinaryUrl);
+        return {
+          ...cloudImg,
+          ...(dbImg && {
+            latitude: dbImg.latitude,
+            longitude: dbImg.longitude,
+            district: dbImg.district,
+            village: dbImg.village,
+            tehsil: dbImg.tehsil,
+            country: dbImg.country
+          })
+        };
+      });
+      
+      return res.status(200).json({ photos: mergedImages });
+    }
+    
+    // Fallback to database only
     const photos = await Image.find({ uploadedBy });
     res.status(200).json({ photos });
   } catch (err) {
+    console.error('Error fetching images by uploadedBy:', err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// ✅ Get images from Cloudinary folder by email
+const getImagesFromCloudinaryFolder = async (folderName) => {
+  if (!cloudinary.config().cloud_name) {
+    console.warn('Cloudinary not configured, falling back to database');
+    return null;
+  }
+  
+  try {
+    const result = await cloudinary.search
+      .expression(`folder:maps-maker/${folderName}`)
+      .sort_by([['created_at', 'desc']])
+      .max_results(500)
+      .execute();
+    
+    return result.resources.map(resource => ({
+      fileId: resource.public_id,
+      cloudinaryUrl: resource.secure_url,
+      name: resource.public_id.split('/').pop(),
+      uploadedBy: folderName === 'first-email' ? 'mhuzaifa8519@gmail.com' : 
+                  folderName === 'second-email' ? 'mhuzaifa86797@gmail.com' : 
+                  folderName === 'third-email' ? 'muhammadjig8@gmail.com' : 'unknown',
+      timestamp: new Date(resource.created_at),
+      // Add any other metadata you want to include
+    }));
+  } catch (err) {
+    console.error(`Error fetching images from Cloudinary folder ${folderName}:`, err);
+    return null;
   }
 };
 
 const getFirstEmailImage = async (req, res) => {
   try {
+    // First try to get from Cloudinary folder
+    const cloudinaryImages = await getImagesFromCloudinaryFolder('first-email');
+    
+    if (cloudinaryImages && cloudinaryImages.length > 0) {
+      // Get additional metadata from database for images that have GPS data
+      const email = 'mhuzaifa8519@gmail.com';
+      const dbImages = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
+      
+      // Merge Cloudinary images with database metadata
+      const mergedImages = cloudinaryImages.map(cloudImg => {
+        const dbImg = dbImages.find(db => db.cloudinaryUrl === cloudImg.cloudinaryUrl);
+        return {
+          ...cloudImg,
+          ...(dbImg && {
+            latitude: dbImg.latitude,
+            longitude: dbImg.longitude,
+            district: dbImg.district,
+            village: dbImg.village,
+            tehsil: dbImg.tehsil,
+            country: dbImg.country
+          })
+        };
+      });
+      
+      return res.status(200).json(mergedImages);
+    }
+    
+    // Fallback to database only
     const email = 'mhuzaifa8519@gmail.com';
     const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
     res.status(200).json(images);
@@ -490,6 +602,34 @@ const getFirstEmailImage = async (req, res) => {
 
 const getSecondEmailImage = async (req, res) => {
   try {
+    // First try to get from Cloudinary folder
+    const cloudinaryImages = await getImagesFromCloudinaryFolder('second-email');
+    
+    if (cloudinaryImages && cloudinaryImages.length > 0) {
+      // Get additional metadata from database for images that have GPS data
+      const email = 'mhuzaifa86797@gmail.com';
+      const dbImages = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
+      
+      // Merge Cloudinary images with database metadata
+      const mergedImages = cloudinaryImages.map(cloudImg => {
+        const dbImg = dbImages.find(db => db.cloudinaryUrl === cloudImg.cloudinaryUrl);
+        return {
+          ...cloudImg,
+          ...(dbImg && {
+            latitude: dbImg.latitude,
+            longitude: dbImg.longitude,
+            district: dbImg.district,
+            village: dbImg.village,
+            tehsil: dbImg.tehsil,
+            country: dbImg.country
+          })
+        };
+      });
+      
+      return res.status(200).json(mergedImages);
+    }
+    
+    // Fallback to database only
     const email = 'mhuzaifa86797@gmail.com';
     const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
     res.status(200).json(images);
@@ -501,6 +641,34 @@ const getSecondEmailImage = async (req, res) => {
 
 const getThirdEmailImage = async (req, res) => {
   try {
+    // First try to get from Cloudinary folder
+    const cloudinaryImages = await getImagesFromCloudinaryFolder('third-email');
+    
+    if (cloudinaryImages && cloudinaryImages.length > 0) {
+      // Get additional metadata from database for images that have GPS data
+      const email = 'muhammadjig8@gmail.com';
+      const dbImages = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
+      
+      // Merge Cloudinary images with database metadata
+      const mergedImages = cloudinaryImages.map(cloudImg => {
+        const dbImg = dbImages.find(db => db.cloudinaryUrl === cloudImg.cloudinaryUrl);
+        return {
+          ...cloudImg,
+          ...(dbImg && {
+            latitude: dbImg.latitude,
+            longitude: dbImg.longitude,
+            district: dbImg.district,
+            village: dbImg.village,
+            tehsil: dbImg.tehsil,
+            country: dbImg.country
+          })
+        };
+      });
+      
+      return res.status(200).json(mergedImages);
+    }
+    
+    // Fallback to database only
     const email = 'muhammadjig8@gmail.com';
     const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
     res.status(200).json(images);
@@ -510,12 +678,82 @@ const getThirdEmailImage = async (req, res) => {
   }
 };
 
+// ✅ Migrate existing images to Cloudinary folders
+const migrateToCloudinaryFolders = async (req, res) => {
+  try {
+    const cloudinary = require('cloudinary').v2;
+    
+    if (!cloudinary.config().cloud_name) {
+      return res.status(500).json({ error: 'Cloudinary not configured' });
+    }
+    
+    const emailMappings = {
+      'mhuzaifa8519@gmail.com': 'first-email',
+      'mhuzaifa86797@gmail.com': 'second-email',
+      'muhammadjig8@gmail.com': 'third-email'
+    };
+    
+    let migrated = 0;
+    let skipped = 0;
+    let errors = 0;
+    
+    for (const [email, folderName] of Object.entries(emailMappings)) {
+      const images = await Image.find({ 
+        uploadedBy: email, 
+        cloudinaryUrl: { $exists: true, $ne: null } 
+      });
+      
+      for (const img of images) {
+        try {
+          // Check if image is already in the correct folder
+          if (img.cloudinaryUrl.includes(`maps-maker/${folderName}`)) {
+            skipped += 1;
+            continue;
+          }
+          
+          // Get the public_id from the current URL
+          const urlParts = img.cloudinaryUrl.split('/');
+          const publicId = urlParts[urlParts.length - 1].split('.')[0];
+          
+          // Move the image to the correct folder
+          const newPublicId = `maps-maker/${folderName}/${folderName}_${Date.now()}_${publicId}`;
+          
+          await cloudinary.uploader.rename(publicId, newPublicId);
+          
+          // Update the database with new URL
+          const newUrl = img.cloudinaryUrl.replace(publicId, newPublicId);
+          await Image.updateOne(
+            { _id: img._id },
+            { cloudinaryUrl: newUrl }
+          );
+          
+          migrated += 1;
+        } catch (err) {
+          console.error(`Error migrating image ${img._id}:`, err.message);
+          errors += 1;
+        }
+      }
+    }
+    
+    res.status(200).json({
+      message: 'Migration completed',
+      migrated,
+      skipped,
+      errors
+    });
+  } catch (err) {
+    console.error('Migration error:', err);
+    res.status(500).json({ error: 'Migration failed', details: err.message });
+  }
+};
+
 module.exports = {
   uploadPhoto,
   streamPhoto,
   getPhotoMeta,
   syncImages,
   migrateDriveToGridFS,
+  migrateToCloudinaryFolders,
   getPhotos,
   getImageStatsByMonth,
   getImageStatsByYear,

@@ -42,6 +42,18 @@ router.post('/organize-cloudinary-images', async (req, res) => {
   }
 });
 
+// ✅ Create Cloudinary folders and organize images
+router.post('/create-folders', async (req, res) => {
+  try {
+    const { createFoldersAndOrganize } = require('../createFolders');
+    await createFoldersAndOrganize();
+    res.status(200).json({ message: 'Folders created and images organized successfully' });
+  } catch (err) {
+    console.error('Create folders error:', err);
+    res.status(500).json({ error: 'Create folders failed', details: err.message });
+  }
+});
+
 // ✅ Upload image (multipart/form-data field: file)
 router.post('/upload', upload.single('file'), uploadPhoto);
 

@@ -6,34 +6,38 @@ const { uploadBufferToGridFS, openDownloadStreamById } = require('../config/grid
 const cloudinary = require('cloudinary').v2;
 
 // ✅ Configure Cloudinary
-if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
-  });
-}
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-// ✅ Upload buffer to Cloudinary with email-specific folder
+// ✅ Upload buffer to Cloudinary (only 3 specific folders allowed)
 const uploadBufferToCloudinary = async (buffer, filename, uploadedBy = 'anonymous') => {
   if (!cloudinary.config().cloud_name) return null;
-  
-  // Create folder name based on email
- 
- if (uploadedBy === 'mhuzaifa8519@gmail.com') {
+
+  let folderName;
+
+  // ✅ Only allow 3 specific emails → 3 fixed folders
+  if (uploadedBy === 'mhuzaifa8519@gmail.com') {
     folderName = 'first-email';
   } else if (uploadedBy === 'mhuzaifa86797@gmail.com') {
     folderName = 'second-email';
   } else if (uploadedBy === 'muhammadjig8@gmail.com') {
     folderName = 'third-email';
+  } else {
+    // Optional: reject or assign a general fallback
+    folderName = 'unknown-user';
   }
-  
+
   return await new Promise((resolve, reject) => {
     const upload = cloudinary.uploader.upload_stream(
-      { 
-        folder: `maps-maker/${folderName}`, 
-        public_id: filename ? `${folderName}_${Date.now()}_${filename.split('.').slice(0, -1).join('.')}` : undefined, 
-        resource_type: 'image' 
+      {
+        folder: `maps-maker/${folderName}`,
+        public_id: filename
+          ? `${folderName}_${Date.now()}_${filename.split('.').slice(0, -1).join('.')}`
+          : undefined,
+        resource_type: 'image'
       },
       (error, result) => {
         if (error) return reject(error);
@@ -44,7 +48,7 @@ const uploadBufferToCloudinary = async (buffer, filename, uploadedBy = 'anonymou
   });
 };
 
-// ✅ Download file from Google Drive (serverless compatible)
+// ✅ Download file from Google Drive
 const downloadFile = async (fileId, accessToken) => {
   const response = await axios.get(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
@@ -53,7 +57,7 @@ const downloadFile = async (fileId, accessToken) => {
   return response.data;
 };
 
-// ✅ Reverse Geocoding via Google API
+// ✅ Reverse Geocoding (Google API)
 const getPlaceDetails = async (lat, lng) => {
   try {
     const res = await axios.get("https://maps.googleapis.com/maps/api/geocode/json", {
@@ -78,21 +82,20 @@ const getPlaceDetails = async (lat, lng) => {
   }
 };
 
-// ✅ Upload a single image, save binary in GridFS and metadata in Images collection
+// ✅ Upload a single image
 const uploadPhoto = async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) {
+    if (mongoose.connection.readyState !== 1)
       return res.status(503).json({ error: 'Database not connected' });
-    }
-    if (!req.file) {
+
+    if (!req.file)
       return res.status(400).json({ error: 'No file uploaded' });
-    }
 
     const fileBuffer = req.file.buffer;
     const originalName = req.file.originalname;
     const mimeType = req.file.mimetype;
 
-    // Extract EXIF if available
+    // Extract EXIF data
     let latitude = null, longitude = null, timestamp = new Date();
     try {
       if (['image/jpeg', 'image/jpg', 'image/tiff'].includes(mimeType)) {
@@ -112,11 +115,9 @@ const uploadPhoto = async (req, res) => {
     }
 
     let placeDetails = { district: '', tehsil: '', village: '', country: '' };
-    if (latitude && longitude) {
-      placeDetails = await getPlaceDetails(latitude, longitude);
-    }
+    if (latitude && longitude) placeDetails = await getPlaceDetails(latitude, longitude);
 
-    // Upload to Cloudinary
+    // Upload to Cloudinary (to one of the 3 folders)
     let cloudResult = null;
     try {
       cloudResult = await uploadBufferToCloudinary(fileBuffer, originalName, req.user?.email || 'anonymous');
@@ -124,22 +125,19 @@ const uploadPhoto = async (req, res) => {
       console.warn('Cloudinary upload failed:', e?.message || e);
     }
 
-    // Upload binary to GridFS (optional redundancy)
+    // Upload to GridFS
     let fileId = null;
     try {
       fileId = await uploadBufferToGridFS({
         filename: originalName,
         contentType: mimeType,
         buffer: fileBuffer,
-        metadata: {
-          uploadedBy: req.user?.email || 'anonymous',
-        }
+        metadata: { uploadedBy: req.user?.email || 'anonymous' }
       });
     } catch (e) {
       console.warn('GridFS upload failed:', e?.message || e);
     }
 
-    // Persist metadata
     const doc = await Image.create({
       fileId: fileId ? String(fileId) : undefined,
       name: originalName,
@@ -159,6 +157,9 @@ const uploadPhoto = async (req, res) => {
     return res.status(500).json({ error: 'Failed to upload image', details: err.message });
   }
 };
+
+
+
 
 // ✅ Stream image by id from GridFS
 const streamPhoto = async (req, res) => {
@@ -745,7 +746,6 @@ const migrateToCloudinaryFolders = async (req, res) => {
     res.status(500).json({ error: 'Migration failed', details: err.message });
   }
 };
-
 module.exports = {
   uploadPhoto,
   streamPhoto,

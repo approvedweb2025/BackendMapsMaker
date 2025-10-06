@@ -19,8 +19,8 @@ const uploadBufferToCloudinary = async (buffer, filename, uploadedBy = 'anonymou
   if (!cloudinary.config().cloud_name) return null;
   
   // Create folder name based on email
-  let folderName = 'general';
-  if (uploadedBy === 'mhuzaifa8519@gmail.com') {
+ 
+ if (uploadedBy === 'mhuzaifa8519@gmail.com') {
     folderName = 'first-email';
   } else if (uploadedBy === 'mhuzaifa86797@gmail.com') {
     folderName = 'second-email';
@@ -487,7 +487,6 @@ const getImagesByUploadedBy = async (req, res) => {
     const { uploadedBy } = req.params;
     
     // Determine folder name based on email
-    let folderName = 'general';
     if (uploadedBy === 'mhuzaifa8519@gmail.com') {
       folderName = 'first-email';
     } else if (uploadedBy === 'mhuzaifa86797@gmail.com') {

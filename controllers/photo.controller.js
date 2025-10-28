@@ -1,63 +1,20 @@
 const axios = require('axios');
 const exifr = require('exifr');
-const mongoose = require('mongoose');
 const Image = require('../models/Image.model');
-const { uploadBufferToGridFS, openDownloadStreamById } = require('../config/gridfs');
-const cloudinary = require('cloudinary').v2;
 
-// ✅ Configure Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
-
-// ✅ Upload buffer to Cloudinary (only 3 specific folders allowed)
-const uploadBufferToCloudinary = async (buffer, filename, uploadedBy = 'anonymous') => {
-  if (!cloudinary.config().cloud_name) return null;
-
-  let folderName;
-
-  // ✅ Only allow 3 specific emails → 3 fixed folders
-  if (uploadedBy === 'mhuzaifa8519@gmail.com') {
-    folderName = 'first-email';
-  } else if (uploadedBy === 'mhuzaifa86797@gmail.com') {
-    folderName = 'second-email';
-  } else if (uploadedBy === 'muhammadjig8@gmail.com') {
-    folderName = 'third-email';
-  } else {
-    // Optional: reject or assign a general fallback
-    folderName = 'unknown-user';
-  }
-
-  return await new Promise((resolve, reject) => {
-    const upload = cloudinary.uploader.upload_stream(
-      {
-        folder: `maps-maker/${folderName}`,
-        public_id: filename
-          ? `${folderName}_${Date.now()}_${filename.split('.').slice(0, -1).join('.')}`
-          : undefined,
-        resource_type: 'image'
-      },
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-    upload.end(buffer);
-  });
-};
-
-// ✅ Download file from Google Drive
-const downloadFile = async (fileId, accessToken) => {
+// ✅ MODIFIED: Downloads a file from Google Drive directly into a memory buffer.
+const downloadFileToBuffer = async (fileId, accessToken) => {
   const response = await axios.get(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-    { headers: { Authorization: `Bearer ${accessToken}` }, responseType: 'arraybuffer' }
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      responseType: 'arraybuffer' // Crucial: tells axios to receive binary data as a buffer
+    }
   );
-  return response.data;
+  return Buffer.from(response.data, 'binary');
 };
 
-// ✅ Reverse Geocoding (Google API)
+// ✅ Reverse Geocoding via Google API (No changes needed)
 const getPlaceDetails = async (lat, lng) => {
   try {
     const res = await axios.get("https://maps.googleapis.com/maps/api/geocode/json", {
@@ -82,154 +39,10 @@ const getPlaceDetails = async (lat, lng) => {
   }
 };
 
-// ✅ Upload a single image
-const uploadPhoto = async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1)
-      return res.status(503).json({ error: 'Database not connected' });
-
-    if (!req.file)
-      return res.status(400).json({ error: 'No file uploaded' });
-
-    const fileBuffer = req.file.buffer;
-    const originalName = req.file.originalname;
-    const mimeType = req.file.mimetype;
-
-    // Extract EXIF data
-    let latitude = null, longitude = null, timestamp = new Date();
-    try {
-      if (['image/jpeg', 'image/jpg', 'image/tiff'].includes(mimeType)) {
-        const exifData = await exifr.parse(fileBuffer);
-        if (exifData) {
-          if (exifData.latitude && exifData.longitude) {
-            latitude = exifData.latitude;
-            longitude = exifData.longitude;
-          }
-          if (exifData.DateTimeOriginal) {
-            timestamp = new Date(exifData.DateTimeOriginal);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('EXIF parse failed:', err.message);
-    }
-
-    let placeDetails = { district: '', tehsil: '', village: '', country: '' };
-    if (latitude && longitude) placeDetails = await getPlaceDetails(latitude, longitude);
-
-    // Upload to Cloudinary (to one of the 3 folders)
-    let cloudResult = null;
-    try {
-      cloudResult = await uploadBufferToCloudinary(fileBuffer, originalName, req.user?.email || 'anonymous');
-    } catch (e) {
-      console.warn('Cloudinary upload failed:', e?.message || e);
-    }
-
-    // Upload to GridFS
-    let fileId = null;
-    try {
-      fileId = await uploadBufferToGridFS({
-        filename: originalName,
-        contentType: mimeType,
-        buffer: fileBuffer,
-        metadata: { uploadedBy: req.user?.email || 'anonymous' }
-      });
-    } catch (e) {
-      console.warn('GridFS upload failed:', e?.message || e);
-    }
-
-    const doc = await Image.create({
-      fileId: fileId ? String(fileId) : undefined,
-      name: originalName,
-      mimeType,
-      latitude,
-      longitude,
-      uploadedBy: req.user?.email || 'anonymous',
-      timestamp,
-      lastCheckedAt: new Date(),
-      cloudinaryUrl: cloudResult?.secure_url || null,
-      ...placeDetails
-    });
-
-    return res.status(201).json({ message: 'Uploaded', photo: doc });
-  } catch (err) {
-    console.error('❌ Upload error:', err);
-    return res.status(500).json({ error: 'Failed to upload image', details: err.message });
-  }
-};
-
-
-
-
-// ✅ Stream image by id from GridFS
-const streamPhoto = async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({ error: 'Database not connected' });
-    }
-    const { id } = req.params;
-    // Accept either ObjectId string for GridFS or Image.fileId stored as string
-    let objectId;
-    try {
-      objectId = new mongoose.Types.ObjectId(id);
-    } catch (_) {
-      // if not a valid ObjectId, try to resolve from Image model
-      const record = await Image.findOne({ fileId: id });
-      if (!record) return res.status(404).json({ error: 'Image not found' });
-      try {
-        objectId = new mongoose.Types.ObjectId(record.fileId);
-      } catch (e2) {
-        return res.status(400).json({ error: 'Stored fileId is not a valid ObjectId' });
-      }
-    }
-
-    const imageDoc = await Image.findOne({ $or: [{ fileId: id }, { fileId: String(objectId) }] });
-    const contentType = imageDoc?.mimeType || 'application/octet-stream';
-
-    res.setHeader('Content-Type', contentType);
-    const readStream = openDownloadStreamById(objectId);
-    readStream.on('error', (e) => {
-      console.error('GridFS read error:', e?.message || e);
-      if (!res.headersSent) res.status(500).end();
-    });
-    readStream.pipe(res);
-  } catch (err) {
-    console.error('❌ Stream error:', err);
-    return res.status(500).json({ error: 'Failed to stream image' });
-  }
-};
-
-// ✅ Read metadata for a single photo
-const getPhotoMeta = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const photo = await Image.findOne({ $or: [{ _id: id }, { fileId: id }] });
-    if (!photo) return res.status(404).json({ error: 'Not found' });
-    return res.status(200).json({ photo });
-  } catch (err) {
-    return res.status(500).json({ error: 'Failed to get metadata' });
-  }
-};
-
-// ✅ Sync Google Drive images → DB (Vercel compatible)
+// ✅ MODIFIED: Syncs Google Drive images directly to the database.
 const syncImages = async (req, res) => {
-  // In serverless (Vercel), sessions may not persist. Allow token via header/query/body.
-  let accessToken = null;
-  if (req.isAuthenticated && req.isAuthenticated()) {
-    accessToken = req.user?.accessToken;
-  }
-  if (!accessToken) {
-    const authHeader = req.headers.authorization || '';
-    if (authHeader.startsWith('Bearer ')) {
-      accessToken = authHeader.substring('Bearer '.length);
-    }
-  }
-  if (!accessToken) {
-    accessToken = req.query.accessToken || req.body?.accessToken || null;
-  }
-  if (!accessToken) {
-    return res.status(401).json({ error: 'Not authenticated. Provide Google accessToken via Authorization: Bearer <token> or ?accessToken=...' });
-  }
+  if (!req.isAuthenticated()) return res.status(401).send('Not authenticated');
+  const accessToken = req.user.accessToken;
 
   try {
     let files = [];
@@ -251,30 +64,24 @@ const syncImages = async (req, res) => {
 
     console.log(`✅ Total files fetched: ${files.length}`);
 
-    let syncedCount = 0;
-    let skippedExisting = 0;
-    let failedCount = 0;
-
     for (const file of files) {
       try {
-        // Treat previously-synced docs that used Drive id as fileId as existing
-        const exists = await Image.findOne({ $or: [{ fileId: file.id }, { driveFileId: file.id }] });
-        if (exists) { skippedExisting += 1; continue; }
+        const exists = await Image.findOne({ fileId: file.id });
+        if (exists) continue;
 
-        // ✅ Download file data (serverless compatible - no temp files)
-        const fileData = await downloadFile(file.id, accessToken);
+        // Download image from Google Drive into a buffer
+        const imageBuffer = await downloadFileToBuffer(file.id, accessToken);
 
         let latitude = null, longitude = null;
         let timestamp = new Date(file.createdTime || Date.now());
 
         try {
           if (['image/jpeg', 'image/jpg', 'image/tiff'].includes(file.mimeType)) {
-            const exifData = await exifr.parse(fileData);
+            // Parse EXIF data directly from the buffer
+            const exifData = await exifr.parse(imageBuffer);
             if (exifData) {
-              if (exifData.latitude && exifData.longitude) {
-                latitude = exifData.latitude;
-                longitude = exifData.longitude;
-              }
+              latitude = exifData.latitude || null;
+              longitude = exifData.longitude || null;
               if (exifData.DateTimeOriginal) {
                 timestamp = new Date(exifData.DateTimeOriginal);
               }
@@ -289,148 +96,68 @@ const syncImages = async (req, res) => {
           placeDetails = await getPlaceDetails(latitude, longitude);
         }
 
-        // 🟢 Upload to Cloudinary for CDN access
-        let cloudResult = null;
-        try {
-          cloudResult = await uploadBufferToCloudinary(Buffer.from(fileData), file.name, 'google-drive');
-        } catch (e) {
-          console.warn(`⚠️ Cloudinary upload failed for ${file.name}:`, e?.message || e);
-        }
-
-        // 🟢 Store bytes in GridFS so we can stream reliably (optional)
-        let gridfsId = null;
-        try {
-          gridfsId = await uploadBufferToGridFS({
-            filename: file.name,
-            contentType: file.mimeType,
-            buffer: Buffer.from(fileData),
-            metadata: { source: 'google-drive', driveFileId: file.id }
-          });
-        } catch (upErr) {
-          console.warn(`⚠️ GridFS upload failed for ${file.name}:`, upErr?.message || upErr);
-        }
-
+        // Create a new document in the database with the image data
         await Image.create({
-          fileId: gridfsId ? String(gridfsId) : file.id,
-          driveFileId: file.id,
+          fileId: file.id,
           name: file.name,
           mimeType: file.mimeType,
+          imageData: imageBuffer, // ✅ Save the image buffer directly
           latitude,
           longitude,
           timestamp,
-          uploadedBy: (req.user && req.user.email) || 'google-drive',
+          uploadedBy: req.user.email,
           lastCheckedAt: new Date(),
-          googleDriveUrl: `https://drive.google.com/file/d/${file.id}/view`,
-          cloudinaryUrl: cloudResult?.secure_url || null,
           ...placeDetails
         });
-        syncedCount += 1;
-
       } catch (fileErr) {
-        console.error(`❌ Error processing file ${file.name}:`, fileErr);
-        failedCount += 1;
+        console.error(`❌ Error processing file ${file.name}:`, fileErr.message);
       }
     }
 
-    const result = { success: true, total: files.length, synced: syncedCount, skipped: skippedExisting, failed: failedCount };
-    // Optional redirect via query: /photos/sync-images?redirect=1
-    if (req.query.redirect === '1' && process.env.FRONTEND_URL) {
-      return res.redirect(`${process.env.FRONTEND_URL}/home`);
-    }
-    return res.status(200).json(result);
+    res.redirect(`${process.env.FRONTEND_URL}/home`);
   } catch (err) {
-    const details = err?.response?.data || err?.message || String(err);
-    console.error('❌ Sync error:', details);
-    res.status(500).json({ error: 'Failed to sync images', details });
+    console.error('❌ Sync error:', err);
+    res.status(500).send('Failed to sync images');
   }
 };
 
-// ✅ Migrate legacy Drive-only records into GridFS (requires Google access token)
-const migrateDriveToGridFS = async (req, res) => {
-  // Accept accessToken via header/query/body
-  let accessToken = null;
-  const authHeader = req.headers.authorization || '';
-  if (authHeader.startsWith('Bearer ')) {
-    accessToken = authHeader.substring('Bearer '.length);
-  }
-  if (!accessToken) accessToken = req.query.accessToken || req.body?.accessToken || null;
-  if (!accessToken) {
-    return res.status(401).json({ error: 'Provide Google accessToken via Authorization: Bearer <token> or ?accessToken=...' });
-  }
-
-  try {
-    // Find images whose fileId is not a valid ObjectId (likely Drive ids)
-    const notObjectId = { $not: { $regex: /^[a-f0-9]{24}$/ } };
-    const candidates = await Image.find({ fileId: notObjectId });
-
-    let migrated = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    for (const img of candidates) {
-      const driveId = img.driveFileId || img.fileId;
-      if (!driveId) { skipped += 1; continue; }
-
-      try {
-        const data = await downloadFile(driveId, accessToken);
-        // Upload to Cloudinary as well
-        let cloudResult = null;
-        try {
-          cloudResult = await uploadBufferToCloudinary(Buffer.from(data), img.name || `${driveId}.jpg`, img.uploadedBy || 'migration');
-        } catch (e) {
-          console.warn('Cloudinary upload during migration failed:', e?.message || e);
-        }
-        const gridId = await uploadBufferToGridFS({
-          filename: img.name || `${driveId}.jpg`,
-          contentType: img.mimeType || 'image/jpeg',
-          buffer: Buffer.from(data),
-          metadata: { source: 'migration', driveFileId: driveId }
-        });
-
-        img.driveFileId = driveId;
-        img.fileId = String(gridId);
-        if (cloudResult?.secure_url) img.cloudinaryUrl = cloudResult.secure_url;
-        await img.save();
-        migrated += 1;
-      } catch (e) {
-        failed += 1;
-      }
-    }
-
-    return res.status(200).json({ success: true, migrated, skipped, failed, total: candidates.length });
-  } catch (err) {
-    const details = err?.message || String(err);
-    return res.status(500).json({ error: 'Migration failed', details });
-  }
-};
-
-// ✅ Get all photos
+// ✅ Get all photo metadata (excluding the large image buffer for performance)
 const getPhotos = async (req, res) => {
   try {
-    const photos = await Image.find().sort({ createdAt: -1 });
+    const photos = await Image.find().select('-imageData').sort({ createdAt: -1 });
     res.status(200).json({ photos });
   } catch (err) {
     res.status(500).json({ error: 'Something went wrong' });
   }
 };
 
+// ✅ NEW: Get a single image's binary data by its database ID
+const getImageDataById = async (req, res) => {
+  try {
+    const image = await Image.findById(req.params.id);
+    if (!image || !image.imageData) {
+      return res.status(404).send('Image not found');
+    }
+    // Set the correct content-type header and send the binary data
+    res.set('Content-Type', image.mimeType);
+    res.send(image.imageData);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+
+// --- STATS AND OTHER HELPERS (No major changes needed below) ---
+
+
 // ✅ Monthly Stats (month + uploader + count)
 const getImageStatsByMonth = async (req, res) => {
   try {
     const monthlyStats = await Image.aggregate([
-      {
-        $group: {
-          _id: {
-            month: { $dateToString: { format: "%Y-%m", date: "$timestamp" } },
-            uploadedBy: "$uploadedBy"
-          },
-          count: { $sum: 1 }
-        }
-      },
+      { $group: { _id: { month: { $dateToString: { format: "%Y-%m", date: "$timestamp" } }, uploadedBy: "$uploadedBy" }, count: { $sum: 1 } } },
       { $project: { month: "$_id.month", uploadedBy: "$_id.uploadedBy", count: 1, _id: 0 } },
       { $sort: { month: 1 } }
     ]);
-
     const uniqueUploaders = [...new Set(monthlyStats.map((s) => s.uploadedBy).filter(Boolean))];
     res.status(200).json({ stats: monthlyStats, uniqueUploaders });
   } catch (err) {
@@ -438,19 +165,11 @@ const getImageStatsByMonth = async (req, res) => {
   }
 };
 
-// ✅ Yearly Stats (year + uploader + count)
+// ✅ Yearly Stats
 const getImageStatsByYear = async (req, res) => {
   try {
     const yearlyStats = await Image.aggregate([
-      {
-        $group: {
-          _id: {
-            year: { $dateToString: { format: "%Y", date: "$timestamp" } },
-            uploadedBy: "$uploadedBy"
-          },
-          count: { $sum: 1 }
-        }
-      },
+      { $group: { _id: { year: { $dateToString: { format: "%Y", date: "$timestamp" } }, uploadedBy: "$uploadedBy" }, count: { $sum: 1 } } },
       { $project: { year: "$_id.year", uploadedBy: "$_id.uploadedBy", count: 1, _id: 0 } },
       { $sort: { year: 1 } }
     ]);
@@ -460,19 +179,11 @@ const getImageStatsByYear = async (req, res) => {
   }
 };
 
-// ✅ Daily Stats (day + uploader + count)
+// ✅ Daily Stats
 const getImageStatsByDay = async (req, res) => {
   try {
     const dailyStats = await Image.aggregate([
-      {
-        $group: {
-          _id: {
-            date: { $dateToString: { format: "%Y-%m-%d", date: "$timestamp" } },
-            uploadedBy: "$uploadedBy"
-          },
-          count: { $sum: 1 }
-        }
-      },
+      { $group: { _id: { date: { $dateToString: { format: "%Y-%m-%d", date: "$timestamp" } }, uploadedBy: "$uploadedBy" }, count: { $sum: 1 } } },
       { $project: { date: "$_id.date", uploadedBy: "$_id.uploadedBy", count: 1, _id: 0 } },
       { $sort: { date: 1 } }
     ]);
@@ -486,274 +197,48 @@ const getImageStatsByDay = async (req, res) => {
 const getImagesByUploadedBy = async (req, res) => {
   try {
     const { uploadedBy } = req.params;
-    
-    // Determine folder name based on email
-    if (uploadedBy === 'mhuzaifa8519@gmail.com') {
-      folderName = 'first-email';
-    } else if (uploadedBy === 'mhuzaifa86797@gmail.com') {
-      folderName = 'second-email';
-    } else if (uploadedBy === 'muhammadjig8@gmail.com') {
-      folderName = 'third-email';
-    }
-    
-    // First try to get from Cloudinary folder
-    const cloudinaryImages = await getImagesFromCloudinaryFolder(folderName);
-    
-    if (cloudinaryImages && cloudinaryImages.length > 0) {
-      // Get additional metadata from database for images that have GPS data
-      const dbImages = await Image.find({ uploadedBy, longitude: { $ne: null }, latitude: { $ne: null } });
-      
-      // Merge Cloudinary images with database metadata
-      const mergedImages = cloudinaryImages.map(cloudImg => {
-        const dbImg = dbImages.find(db => db.cloudinaryUrl === cloudImg.cloudinaryUrl);
-        return {
-          ...cloudImg,
-          ...(dbImg && {
-            latitude: dbImg.latitude,
-            longitude: dbImg.longitude,
-            district: dbImg.district,
-            village: dbImg.village,
-            tehsil: dbImg.tehsil,
-            country: dbImg.country
-          })
-        };
-      });
-      
-      return res.status(200).json({ photos: mergedImages });
-    }
-    
-    // Fallback to database only
-    const photos = await Image.find({ uploadedBy });
+    const photos = await Image.find({ uploadedBy }).select('-imageData');
     res.status(200).json({ photos });
   } catch (err) {
-    console.error('Error fetching images by uploadedBy:', err);
     res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-// ✅ Get images from Cloudinary folder by email
-const getImagesFromCloudinaryFolder = async (folderName) => {
-  if (!cloudinary.config().cloud_name) {
-    console.warn('Cloudinary not configured, falling back to database');
-    return null;
-  }
-  
-  try {
-    const result = await cloudinary.search
-      .expression(`folder:maps-maker/${folderName}`)
-      .sort_by([['created_at', 'desc']])
-      .max_results(500)
-      .execute();
-    
-    return result.resources.map(resource => ({
-      fileId: resource.public_id,
-      cloudinaryUrl: resource.secure_url,
-      name: resource.public_id.split('/').pop(),
-      uploadedBy: folderName === 'first-email' ? 'mhuzaifa8519@gmail.com' : 
-                  folderName === 'second-email' ? 'mhuzaifa86797@gmail.com' : 
-                  folderName === 'third-email' ? 'muhammadjig8@gmail.com' : 'unknown',
-      timestamp: new Date(resource.created_at),
-      // Add any other metadata you want to include
-    }));
-  } catch (err) {
-    console.error(`Error fetching images from Cloudinary folder ${folderName}:`, err);
-    return null;
   }
 };
 
 const getFirstEmailImage = async (req, res) => {
   try {
-    // First try to get from Cloudinary folder
-    const cloudinaryImages = await getImagesFromCloudinaryFolder('first-email');
-    
-    if (cloudinaryImages && cloudinaryImages.length > 0) {
-      // Get additional metadata from database for images that have GPS data
-      const email = 'mhuzaifa8519@gmail.com';
-      const dbImages = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
-      
-      // Merge Cloudinary images with database metadata
-      const mergedImages = cloudinaryImages.map(cloudImg => {
-        const dbImg = dbImages.find(db => db.cloudinaryUrl === cloudImg.cloudinaryUrl);
-        return {
-          ...cloudImg,
-          ...(dbImg && {
-            latitude: dbImg.latitude,
-            longitude: dbImg.longitude,
-            district: dbImg.district,
-            village: dbImg.village,
-            tehsil: dbImg.tehsil,
-            country: dbImg.country
-          })
-        };
-      });
-      
-      return res.status(200).json({ photos: mergedImages });
-    }
-    
-    // Fallback to database only
     const email = 'mhuzaifa8519@gmail.com';
-    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
-    res.status(200).json({ photos: images });
-  } catch (err) {
-    console.error('Error fetching first email images:', err);
+    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } }).select('-imageData');
+    res.status(200).json(images);
+  } catch {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
 const getSecondEmailImage = async (req, res) => {
   try {
-    // First try to get from Cloudinary folder
-    const cloudinaryImages = await getImagesFromCloudinaryFolder('second-email');
-    
-    if (cloudinaryImages && cloudinaryImages.length > 0) {
-      // Get additional metadata from database for images that have GPS data
-      const email = 'mhuzaifa86797@gmail.com';
-      const dbImages = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
-      
-      // Merge Cloudinary images with database metadata
-      const mergedImages = cloudinaryImages.map(cloudImg => {
-        const dbImg = dbImages.find(db => db.cloudinaryUrl === cloudImg.cloudinaryUrl);
-        return {
-          ...cloudImg,
-          ...(dbImg && {
-            latitude: dbImg.latitude,
-            longitude: dbImg.longitude,
-            district: dbImg.district,
-            village: dbImg.village,
-            tehsil: dbImg.tehsil,
-            country: dbImg.country
-          })
-        };
-      });
-      
-      return res.status(200).json({ photos: mergedImages });
-    }
-    
-    // Fallback to database only
     const email = 'mhuzaifa86797@gmail.com';
-    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
-    res.status(200).json({ photos: images });
-  } catch (err) {
-    console.error('Error fetching second email images:', err);
+    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } }).select('-imageData');
+    res.status(200).json(images);
+  } catch {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
 const getThirdEmailImage = async (req, res) => {
   try {
-    // First try to get from Cloudinary folder
-    const cloudinaryImages = await getImagesFromCloudinaryFolder('third-email');
-    
-    if (cloudinaryImages && cloudinaryImages.length > 0) {
-      // Get additional metadata from database for images that have GPS data
-      const email = 'muhammadjig8@gmail.com';
-      const dbImages = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
-      
-      // Merge Cloudinary images with database metadata
-      const mergedImages = cloudinaryImages.map(cloudImg => {
-        const dbImg = dbImages.find(db => db.cloudinaryUrl === cloudImg.cloudinaryUrl);
-        return {
-          ...cloudImg,
-          ...(dbImg && {
-            latitude: dbImg.latitude,
-            longitude: dbImg.longitude,
-            district: dbImg.district,
-            village: dbImg.village,
-            tehsil: dbImg.tehsil,
-            country: dbImg.country
-          })
-        };
-      });
-      
-      return res.status(200).json({ photos: mergedImages });
-    }
-    
-    // Fallback to database only
     const email = 'muhammadjig8@gmail.com';
-    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } });
-    res.status(200).json({ photos: images });
-  } catch (err) {
-    console.error('Error fetching third email images:', err);
+    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } }).select('-imageData');
+    res.status(200).json(images);
+  } catch {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// ✅ Migrate existing images to Cloudinary folders
-const migrateToCloudinaryFolders = async (req, res) => {
-  try {
-    const cloudinary = require('cloudinary').v2;
-    
-    if (!cloudinary.config().cloud_name) {
-      return res.status(500).json({ error: 'Cloudinary not configured' });
-    }
-    
-    const emailMappings = {
-      'mhuzaifa8519@gmail.com': 'first-email',
-      'mhuzaifa86797@gmail.com': 'second-email',
-      'muhammadjig8@gmail.com': 'third-email'
-    };
-    
-    let migrated = 0;
-    let skipped = 0;
-    let errors = 0;
-    
-    for (const [email, folderName] of Object.entries(emailMappings)) {
-      const images = await Image.find({ 
-        uploadedBy: email, 
-        cloudinaryUrl: { $exists: true, $ne: null } 
-      });
-      
-      for (const img of images) {
-        try {
-          // Check if image is already in the correct folder
-          if (img.cloudinaryUrl.includes(`maps-maker/${folderName}`)) {
-            skipped += 1;
-            continue;
-          }
-          
-          // Get the public_id from the current URL
-          const urlParts = img.cloudinaryUrl.split('/');
-          const publicId = urlParts[urlParts.length - 1].split('.')[0];
-          
-          // Move the image to the correct folder
-          const newPublicId = `maps-maker/${folderName}/${folderName}_${Date.now()}_${publicId}`;
-          
-          await cloudinary.uploader.rename(publicId, newPublicId);
-          
-          // Update the database with new URL
-          const newUrl = img.cloudinaryUrl.replace(publicId, newPublicId);
-          await Image.updateOne(
-            { _id: img._id },
-            { cloudinaryUrl: newUrl }
-          );
-          
-          migrated += 1;
-        } catch (err) {
-          console.error(`Error migrating image ${img._id}:`, err.message);
-          errors += 1;
-        }
-      }
-    }
-    
-    res.status(200).json({
-      message: 'Migration completed',
-      migrated,
-      skipped,
-      errors
-    });
-  } catch (err) {
-    console.error('Migration error:', err);
-    res.status(500).json({ error: 'Migration failed', details: err.message });
-  }
-};
+
 module.exports = {
-  uploadPhoto,
-  streamPhoto,
-  getPhotoMeta,
   syncImages,
-  migrateDriveToGridFS,
-  migrateToCloudinaryFolders,
   getPhotos,
+  getImageDataById, // Make sure to export the new function
   getImageStatsByMonth,
   getImageStatsByYear,
   getImageStatsByDay,

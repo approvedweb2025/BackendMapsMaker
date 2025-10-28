@@ -1,7 +1,7 @@
 const axios = require('axios');
 const exifr = require('exifr');
 const Image = require('../models/Image.model');
-const SyncQueue = require('../models/SyncQueue.model'); // Queue model zaroori hai
+// SyncQueue model ki ab zaroorat nahi hai.
 
 /**
  * Helper function: Google Drive se file download karke buffer mein store karta hai.
@@ -45,127 +45,105 @@ const getPlaceDetails = async (lat, lng) => {
 
 
 // ====================================================================
-// SECTION: SYNC & BACKGROUND PROCESSING (VERCEL OPTIMIZED)
+// SECTION: DIRECT SYNC & PROCESSING (WITHOUT CRON JOB)
 // ====================================================================
 
 /**
- * STEP 1: Sync Trigger - User ki request par call hota hai.
- * Google Drive se file list fetch karke background processing ke liye queue banata hai.
+ * Sync Trigger - Direct processing without a queue.
+ * Yeh function user ki request par call hota hai aur Vercel timeout (10-15s) se bachne ke liye
+ * ek chote batch (e.g., 15 files) ko foran process karta hai.
  */
 const syncImages = async (req, res) => {
-  if (!req.isAuthenticated()) return res.status(401).send('Not authenticated');
+  if (!req.isAuthenticated()) {
+    return res.status(401).send('Not authenticated');
+  }
   const { accessToken, email } = req.user;
 
   try {
-    let files = [];
-    let nextPageToken = null;
+    // Step 1: Google Drive se sabse nayi 15 image files ki list fetch karein.
+    // Zyada files fetch karne par Vercel ka serverless function timeout ho sakta hai.
+    const driveResponse = await axios.get('https://www.googleapis.com/drive/v3/files', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: {
+        q: "mimeType contains 'image/' and trashed=false",
+        fields: 'files(id, name, mimeType, createdTime)',
+        pageSize: 15, // Har sync request par sirf 15 files process karein
+        orderBy: 'createdTime desc' // Sabse nayi files pehle
+      }
+    });
 
-    do {
-      const driveResponse = await axios.get('https://www.googleapis.com/drive/v3/files', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        params: {
-          q: "mimeType contains 'image/' and trashed=false",
-          fields: 'nextPageToken, files(id, name, mimeType, createdTime)',
-          pageToken: nextPageToken
-        }
-      });
-      files.push(...(driveResponse.data.files || []));
-      nextPageToken = driveResponse.data.nextPageToken;
-    } while (nextPageToken);
+    const files = driveResponse.data.files || [];
+    console.log(`✅ Found ${files.length} recent files for user ${email}. Starting immediate processing...`);
 
-    console.log(`✅ Fetched ${files.length} file IDs to be queued for user ${email}.`);
+    let processedCount = 0;
 
+    // Step 2: Har file ko ek-ek karke foran process karein.
     for (const file of files) {
-      const imageExists = await Image.findOne({ fileId: file.id });
-      if (imageExists) continue;
-
-      await SyncQueue.updateOne(
-        { fileId: file.id },
-        {
-          $set: {
-            name: file.name,
-            mimeType: file.mimeType,
-            createdTime: file.createdTime,
-            uploadedBy: email,
-            accessToken: accessToken,
-            status: 'pending'
-          }
-        },
-        { upsert: true }
-      );
-    }
-
-    res.redirect(`${process.env.FRONTEND_URL}?sync=started`);
-  } catch (err) {
-    console.error('❌ Error starting sync:', err.message);
-    res.status(500).redirect(`${process.env.FRONTEND_URL}?sync=failed`);
-  }
-};
-
-/**
- * STEP 2: Queue Processor - Vercel Cron Job se har minute call hota hai.
- * Queue se chote batch mein images process karta hai.
- */
-const processSyncQueue = async (req, res) => {
-  if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
-    return res.status(401).send('Unauthorized');
-  }
-
-  const BATCH_LIMIT = 5; // Ek baar mein 5 images process karega to avoid timeout
-
-  try {
-    const itemsToProcess = await SyncQueue.find({ status: 'pending' }).limit(BATCH_LIMIT);
-    if (itemsToProcess.length === 0) {
-      return res.status(200).json({ message: 'Queue is empty.' });
-    }
-
-    console.log(`Processing ${itemsToProcess.length} items from the queue...`);
-
-    for (const item of itemsToProcess) {
       try {
-        const imageBuffer = await downloadFileToBuffer(item.fileId, item.accessToken);
-        let latitude = null, longitude = null, timestamp = new Date(item.createdTime);
+        // Agar image pehle se database mein hai, to usko skip kar dein.
+        const imageExists = await Image.findOne({ fileId: file.id });
+        if (imageExists) {
+          console.log(`Skipping already existing file: ${file.name}`);
+          continue;
+        }
 
+        console.log(`Processing file: ${file.name}...`);
+        
+        // A. File ko buffer mein download karein
+        const imageBuffer = await downloadFileToBuffer(file.id, accessToken);
+        
+        // B. EXIF data (GPS, timestamp) nikalein
+        let latitude = null, longitude = null, timestamp = new Date(file.createdTime);
         try {
           const exifData = await exifr.parse(imageBuffer);
           if (exifData) {
             latitude = exifData.latitude || null;
             longitude = exifData.longitude || null;
-            if (exifData.DateTimeOriginal) timestamp = new Date(exifData.DateTimeOriginal);
+            if (exifData.DateTimeOriginal) {
+              timestamp = new Date(exifData.DateTimeOriginal);
+            }
           }
-        } catch (exifErr) { console.warn(`⚠️ EXIF error for ${item.name}:`, exifErr.message); }
+        } catch (exifErr) { 
+            console.warn(`⚠️ EXIF parsing error for ${file.name}:`, exifErr.message); 
+        }
 
+        // C. Geocoding (Location details) hasil karein
         const placeDetails = (latitude && longitude) ? await getPlaceDetails(latitude, longitude) : {};
 
+        // D. Tayyar data ko MongoDB mein save karein
         await Image.create({
-          fileId: item.fileId,
-          name: item.name,
-          mimeType: item.mimeType,
+          fileId: file.id,
+          name: file.name,
+          mimeType: file.mimeType,
           imageData: imageBuffer,
           latitude,
           longitude,
           timestamp,
-          uploadedBy: item.uploadedBy,
+          uploadedBy: email,
           lastCheckedAt: new Date(),
           ...placeDetails
         });
 
-        await SyncQueue.deleteOne({ _id: item._id });
+        processedCount++;
       } catch (fileErr) {
-        console.error(`❌ Error processing file ${item.name}:`, fileErr.message);
-        await SyncQueue.updateOne({ _id: item._id }, { $set: { status: 'failed' } });
+        console.error(`❌ Error processing individual file ${file.name}:`, fileErr.message);
+        // Agar ek file fail ho, to process ko rokna nahi, continue karna hai.
       }
     }
-    res.status(200).json({ message: `Successfully processed ${itemsToProcess.length} items.` });
+
+    console.log(`🎉 Sync complete. Successfully processed ${processedCount} new images.`);
+    // User ko frontend par success message ke saath wapas bhej dein.
+    res.redirect(`${process.env.FRONTEND_URL}?sync=completed&count=${processedCount}`);
+
   } catch (err) {
-    console.error('❌ Error in queue processor:', err);
-    res.status(500).json({ error: 'Queue processing failed' });
+    console.error('❌ Error during direct sync process:', err.message);
+    res.status(500).redirect(`${process.env.FRONTEND_URL}?sync=failed`);
   }
 };
 
 
 // ====================================================================
-// SECTION: DATA SERVING & STATS
+// SECTION: DATA SERVING & STATS (Inmein koi tabdeeli nahi)
 // ====================================================================
 
 /**
@@ -209,24 +187,22 @@ const getImagesByUploadedBy = async (req, res) => {
   }
 };
 
-// ... (Functions for specific emails remain the same)
-const getFirstEmailImage = async (req, res) => { /* ... no change ... */ };
-const getSecondEmailImage = async (req, res) => { /* ... no change ... */ };
-const getThirdEmailImage = async (req, res) => { /* ... no change ... */ };
-
-// ... (Functions for stats remain the same)
-const getImageStatsByMonth = async (req, res) => { /* ... no change ... */ };
-const getImageStatsByYear = async (req, res) => { /* ... no change ... */ };
-const getImageStatsByDay = async (req, res) => { /* ... no change ... */ };
+// Yeh functions waise hi rahenge jaise pehle the
+const getFirstEmailImage = async (req, res) => { /* ... Aapka pehle wala code ... */ };
+const getSecondEmailImage = async (req, res) => { /* ... Aapka pehle wala code ... */ };
+const getThirdEmailImage = async (req, res) => { /* ... Aapka pehle wala code ... */ };
+const getImageStatsByMonth = async (req, res) => { /* ... Aapka pehle wala code ... */ };
+const getImageStatsByYear = async (req, res) => { /* ... Aapka pehle wala code ... */ };
+const getImageStatsByDay = async (req, res) => { /* ... Aapka pehle wala code ... */ };
 
 // ====================================================================
 // SECTION: EXPORTS
 // ====================================================================
 
 module.exports = {
-  // Sync and Processing
+  // Syncing and Processing
   syncImages,
-  processSyncQueue,
+  // processSyncQueue, // <-- Isay hata diya gaya hai
 
   // Data Serving
   getPhotos,

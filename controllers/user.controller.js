@@ -1,31 +1,42 @@
-// controllers/userController.js
 const User = require('../models/user.model');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const jwt =jsonwebtoken');
 
-// Register a new user
+/**
+ * @desc    Register a new user
+ * @route   POST /users/register
+ * @access  Public
+ */
 const registerUser = async (req, res) => {
   const { name, email, password } = req.body;
 
+  if (!name || !email || !password) {
+    return res.status(400).json({ message: 'Please provide name, email, and password.' });
+  }
 
   try {
-    // Check if user exists by Email
-    const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ message: 'User already exists' });
+    // Check if user already exists with the same email
+    const existingUserByEmail = await User.findOne({ email });
+    if (existingUserByEmail) {
+      return res.status(400).json({ message: 'A user with this email already exists.' });
+    }
 
-    // Check if user exists by Email
-    const existingUserByname = await User.findOne({ name });
-    if (existingUserByname) return res.status(400).json({ message: 'Change Your Username, and try again' });
+    // Check if user already exists with the same username
+    const existingUserByName = await User.findOne({ name });
+    if (existingUserByName) {
+      return res.status(400).json({ message: 'This username is already taken. Please choose another one.' });
+    }
 
-    // Hash password
+    // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const allUsers = await User.find();
+    // Check if this is the first user. If so, make them an admin.
+    const userCount = await User.countDocuments();
+    let newUser;
 
-    let user;
-    if (allUsers.length === 0) {
-      // Create admin
-      user = await User.create({
+    if (userCount === 0) {
+      // Create the first user as an admin with approved status
+      newUser = await User.create({
         name,
         email,
         password: hashedPassword,
@@ -33,102 +44,68 @@ const registerUser = async (req, res) => {
         statusaccess: 'approved',
       });
     } else {
-
-      // Create user
-      user = await User.create({
+      // Create a regular user with pending status
+      newUser = await User.create({
         name,
         email,
         password: hashedPassword,
-        permissions: ['Dashboard', 'MyInfo']
+        permissions: ['Dashboard', 'MyInfo'] // Default permissions
       });
     }
 
+    // Don't send password back
+    const { password: _, ...userToReturn } = newUser.toObject();
 
-    res.status(201).json({ message: 'User registered', user });
+    res.status(201).json({ message: 'User registered successfully. Waiting for admin approval.', user: userToReturn });
+
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Register User Error:', error);
+    res.status(500).json({ message: 'Server error during registration.', error: error.message });
   }
 };
 
-// Get Pending Status Users
-const getrequest = async (req, res) => {
-  try {
-    const requests = await User.find({ statusaccess: 'pending' });
-    res.status(200).json({ requests });
-  } catch (err) {
-    res.status(500).json({ message: 'Error to Fetch Requests', error: err.message });
-  }
-};
-
-// Get Denied Status Users
-const getdeniedrequest = async (req, res) => {
-  try {
-    const user = await User.find({ role: 'user' });
-    if (user) {
-      const requests = await User.find({
-        statusaccess: 'denied',
-        role: { $ne: 'admin' }
-      });
-      res.status(200).json({ requests });
-    }
-  } catch (err) {
-    res.status(500).json({ message: 'Error to Fetch Requests', error: err.message });
-  }
-};
-
-// Get Approved Status Users
-const getapprovedrequest = async (req, res) => {
-  try {
-    const requests = await User.find({
-      statusaccess: 'approved',
-      role: { $ne: 'admin' }
-    });
-    res.status(200).json({ requests });
-  } catch (err) {
-    res.status(500).json({ message: 'Error to Fetch Requests', error: err.message });
-  }
-};
-
-const allowUser = async (req, res) => {
-  try {
-    const { Id, status } = req.body;
-
-    const user = await User.findByIdAndUpdate(Id, { statusaccess: status }, { new: true });
-
-    if (user) {
-      res.status(200).json({ message: `User status ${status} successfully` });
-    }
-
-  } catch (err) {
-    res.status(500).json({ 'User status not updated': err.message })
-  };
-}
-
-// Login user
+/**
+ * @desc    Login a user
+ * @route   POST /users/login
+ * @access  Public
+ */
 const loginUser = async (req, res) => {
   const { name, password } = req.body;
 
-  try {
-    // Find user
-    const user = await User.findOne({ name });
-    if (!user) return res.status(400).json({ message: 'Incorrect email or password' });
+  if (!name || !password) {
+    return res.status(400).json({ message: 'Please provide username and password.' });
+  }
 
-    if (user.role === 'user') {
-      if (user.statusaccess === 'denied') return res.status(400).json({ message: 'Your account has been denied' });
-      if (user.statusaccess === 'pending') return res.status(400).json({ message: 'Your account has been pending' });
+  try {
+    // Find user by username
+    const user = await User.findOne({ name });
+    if (!user) {
+      return res.status(400).json({ message: 'Incorrect username or password.' });
     }
 
-    // Check password
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: 'Incorrect email or password' });
+    // Check user status before allowing login
+    if (user.role === 'user') {
+      if (user.statusaccess === 'denied') {
+        return res.status(403).json({ message: 'Your account access has been denied by the admin.' });
+      }
+      if (user.statusaccess === 'pending') {
+        return res.status(403).json({ message: 'Your account is pending approval from the admin.' });
+      }
+    }
 
-    // Create token
+    // Check if password matches
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Incorrect username or password.' });
+    }
+
+    // Create JWT token
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
-    // Remove password before sending user data
+    // Remove password from the user object before sending response
     const { password: _, ...userData } = user.toObject();
 
-    // Set token in cookie
+    // Set token in an HTTP-Only cookie for security
     res.cookie('token', token, {
       httpOnly: true,
       sameSite: 'Strict',
@@ -136,7 +113,6 @@ const loginUser = async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    // Send response
     res.status(200).json({
       message: 'Login successful',
       user: userData,
@@ -144,203 +120,46 @@ const loginUser = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Login Error:', error);
+    res.status(500).json({ message: 'Server error during login.', error: error.message });
   }
 };
 
-const logoutUser = async (req, res) => {
+/**
+ * @desc    Logout a user
+ * @route   POST /users/logout
+ * @access  Public
+ */
+const logoutUser = (req, res) => {
   try {
-    // Clear the cookie
+    // Clear the token cookie
     res.clearCookie('token', {
       httpOnly: true,
       sameSite: 'Strict',
       secure: process.env.NODE_ENV === 'production',
     });
-
-    res.status(200).json({ message: 'Logout successful' });
+    res.status(200).json({ message: 'Logout successful.' });
   } catch (error) {
-    console.error('Logout error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Logout Error:', error);
+    res.status(500).json({ message: 'Server error during logout.', error: error.message });
   }
 };
 
-const getUserByEmail = async (req, res) => {
-  try {
-    const email = req.query;
-    const user = await User.findOne(email).select('-password');
-    res.status(200).json(user)
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to Fetch User', error: err.message })
-  }
-}
-// Get admin users
-const getAdmin = async (req, res) => {
-  try {
-    const user = await User.findOne({ name: req.body.username });
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" }); // ✅ use return
-    }
-
-    return res.status(200).json(user.role); // or { role: user.role }
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: "Server error" });
-  }
+/**
+ * @desc    Get current logged-in user's details
+ * @route   GET /users/me
+ * @access  Private
+ */
+const me = (req, res) => {
+  // The user object is attached to req by the authMiddleware
+  res.status(200).json({ user: req.user });
 };
 
-
-// Get admin for Wrapper
-const getAdminWrapper = async (req, res) => {
-  try {
-    const { username } = req.body;
-
-    const admin = await User.findOne({ name: username }).select('-password');
-
-    if (!admin) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    if (admin.role === 'admin') {
-      return res.status(200).json({ role: 'admin' });
-    }
-
-    return res.status(200).json({ role: 'user', permissions: admin.permissions || [] });
-
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-};
-
-// Get all users
-const getUsers = async (req, res) => {
-  try {
-    const users = await User.find({ role: { $ne: 'admin' } }).select('-password');
-
-    res.status(200).json(users);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-};
-
-// Delete User
-const deleteUser = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const deletedUser = await User.findByIdAndDelete(id);
-
-    res.status(200).json({ message: 'User deleted successfully' })
-
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to Delete User' })
-
-  }
-};
-
-// User Page Access
-const userAccess = async (req, res) => {
-  const { username } = req.params;
-  const { pages } = req.body;
-
-  try {
-    const updatedUser = await User.findOneAndUpdate(
-      { name: username }, // adjust field name as needed
-      { permissions: pages }, // don't wrap in [ ] unless pages is a single item
-      { new: true }
-    );
-
-    if (!updatedUser) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    res.status(200).json({ message: 'Permissions updated', user: updatedUser });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to update user' });
-  }
-
-}
-
-// Check Permissions
-const checkPermissions = async (req, res) => {
-  try {
-    const { username } = req.params;
-
-    const user = await User.findOne({ name: username });
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const filteredPermissions = (user.permissions || []).filter(
-      (perm) => perm !== 'Dashboard' && perm !== 'MyInfo'
-    );
-
-    res.status(200).json({
-      message: 'Access Granted Successfully',
-      permissions: filteredPermissions,
-    });
-
-  } catch (err) {
-    res.status(500).json({ message: "Failed to Fetch Permissions" });
-  }
-};
-
-// Add User By Admin
-
-const addUser = async (req, res) => {
-  try {
-    const { name, email, password, statusaccess } = req.body;
-
-    // Basic validation
-    if (!name || !email || !password || !statusaccess) {
-      return res.status(400).json({ message: 'All fields are required' });
-    }
-
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(409).json({ message: 'email already registered' });
-    }
-
-    const Username = await User.findOne({ name });
-    if (Username) {
-      return res.status(409).json({ message: 'Username already exists' });
-    }
-
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create user
-    const user = await User.create({
-      name,
-      email,
-      password: hashedPassword,
-      statusaccess,
-      permissions: ['Dashboard', 'MyInfo']
-    });
-
-    if (user) {
-      return res.status(200).json({ message: 'User created successfully' });
-    }
-
-    res.status(500).json({ message: 'User creation failed' });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
-};
-
-
-// Check LoggedIn User 
-const me = async (req, res) => {
-  try {
-    res.status(200).json({ user: req.user });
-  } catch (err) {
-    res.status(401).json({ message: ' Failed to Fetch User' })
-  }
-}
-
+/**
+ * @desc    Update user details (username, password)
+ * @route   PUT /users/user/:id
+ * @access  Private (User can update their own info)
+ */
 const updateUserDetails = async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -350,50 +169,249 @@ const updateUserDetails = async (req, res) => {
       return res.status(400).json({ message: 'Username is required.' });
     }
 
-    const alreadyexistUsername = await User.findOne({ name: username });
-
-    if (alreadyexistUsername && alreadyexistUsername._id.toString() !== id) {
-      return res.status(409).json({ message: 'Username already exists' });
+    // Check if the new username is already taken by another user
+    const existingUser = await User.findOne({ name: username });
+    if (existingUser && existingUser._id.toString() !== id) {
+      return res.status(409).json({ message: 'Username already exists.' });
     }
 
     const updateData = { name: username };
 
+    // If a new password is provided, hash it and add to update data
     if (password && password.trim() !== '') {
-      const hashedPassword = await bcrypt.hash(password, 10);
-      updateData.password = hashedPassword;
+      updateData.password = await bcrypt.hash(password, 10);
     }
 
-    const updatedUser = await User.findByIdAndUpdate(id, updateData, { new: true });
+    const updatedUser = await User.findByIdAndUpdate(id, updateData, { new: true }).select('-password');
 
     if (!updatedUser) {
       return res.status(404).json({ error: 'User not found.' });
     }
 
-    res.status(200).json({ message: 'User updated successfully.' });
+    res.status(200).json({ message: 'User updated successfully.', user: updatedUser });
   } catch (err) {
-    console.error('❌ Update error:', err);
+    console.error('❌ Update User Error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
+// --- Admin Only Functions ---
 
+/**
+ * @desc    Get all non-admin users
+ * @route   GET /users
+ * @access  Admin
+ */
+const getUsers = async (req, res) => {
+  try {
+    const users = await User.find({ role: { $ne: 'admin' } }).select('-password');
+    res.status(200).json(users);
+  } catch (error) {
+    console.error('Get Users Error:', error);
+    res.status(500).json({ message: 'Server error while fetching users.', error: error.message });
+  }
+};
+
+/**
+ * @desc    Get users with 'pending' status
+ * @route   GET /users/getrequest
+ * @access  Admin
+ */
+const getrequest = async (req, res) => {
+  try {
+    const requests = await User.find({ statusaccess: 'pending', role: { $ne: 'admin' } }).select('-password');
+    res.status(200).json({ requests });
+  } catch (err) {
+    console.error('Get Pending Requests Error:', err);
+    res.status(500).json({ message: 'Error fetching pending requests.', error: err.message });
+  }
+};
+
+/**
+ * @desc    Get users with 'denied' status
+ * @route   GET /users/denied-request
+ * @access  Admin
+ */
+const getdeniedrequest = async (req, res) => {
+  try {
+    const requests = await User.find({ statusaccess: 'denied', role: { $ne: 'admin' } }).select('-password');
+    res.status(200).json({ requests });
+  } catch (err) {
+    console.error('Get Denied Requests Error:', err);
+    res.status(500).json({ message: 'Error fetching denied requests.', error: err.message });
+  }
+};
+
+/**
+ * @desc    Get users with 'approved' status
+ * @route   GET /users/approved-request
+ * @access  Admin
+ */
+const getapprovedrequest = async (req, res) => {
+  try {
+    const requests = await User.find({ statusaccess: 'approved', role: { $ne: 'admin' } }).select('-password');
+    res.status(200).json({ requests });
+  } catch (err) {
+    console.error('Get Approved Requests Error:', err);
+    res.status(500).json({ message: 'Error fetching approved requests.', error: err.message });
+  }
+};
+
+/**
+ * @desc    Approve or deny a user's access
+ * @route   POST /users/status
+ * @access  Admin
+ */
+const allowUser = async (req, res) => {
+  try {
+    const { Id, status } = req.body;
+    if (!Id || !status || !['approved', 'denied'].includes(status)) {
+        return res.status(400).json({ message: 'User ID and a valid status are required.' });
+    }
+
+    const user = await User.findByIdAndUpdate(Id, { statusaccess: status }, { new: true });
+
+    if (!user) {
+        return res.status(404).json({ message: 'User not found.' });
+    }
+    res.status(200).json({ message: `User status successfully updated to ${status}.` });
+  } catch (err) {
+    console.error('Allow User Error:', err);
+    res.status(500).json({ message: 'User status could not be updated.', error: err.message });
+  }
+};
+
+/**
+ * @desc    Add a new user by an admin
+ * @route   POST /users/userbyadmin
+ * @access  Admin
+ */
+const addUser = async (req, res) => {
+    // This function is very similar to registerUser, but for admin use.
+    // It can be refactored, but for now, it's kept as is from your code.
+    const { name, email, password, statusaccess } = req.body;
+
+    if (!name || !email || !password || !statusaccess) {
+      return res.status(400).json({ message: 'All fields are required.' });
+    }
+    
+    try {
+        const existingUser = await User.findOne({ $or: [{ email }, { name }] });
+        if (existingUser) {
+            return res.status(409).json({ message: 'A user with this email or username already exists.' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        await User.create({
+            name,
+            email,
+            password: hashedPassword,
+            statusaccess,
+            permissions: ['Dashboard', 'MyInfo']
+        });
+
+        res.status(201).json({ message: 'User created successfully by admin.' });
+
+    } catch (err) {
+        console.error('Add User by Admin Error:', err);
+        res.status(500).json({ message: 'Server error while creating user.', error: err.message });
+    }
+};
+
+/**
+ * @desc    Delete a user
+ * @route   DELETE /users/delete/:id
+ * @access  Admin
+ */
+const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedUser = await User.findByIdAndDelete(id);
+    if (!deletedUser) {
+        return res.status(404).json({ message: 'User not found.' });
+    }
+    res.status(200).json({ message: 'User deleted successfully.' });
+  } catch (err) {
+    console.error('Delete User Error:', err);
+    res.status(500).json({ message: 'Failed to delete user.', error: err.message });
+  }
+};
+
+/**
+ * @desc    Update a user's page permissions
+ * @route   POST /users/give-access/:username
+ * @access  Admin
+ */
+const userAccess = async (req, res) => {
+  const { username } = req.params;
+  const { pages } = req.body; // Expecting pages to be an array of strings
+
+  if (!Array.isArray(pages)) {
+    return res.status(400).json({ message: 'Permissions must be provided as an array.' });
+  }
+
+  try {
+    const updatedUser = await User.findOneAndUpdate(
+      { name: username },
+      { $set: { permissions: pages } },
+      { new: true }
+    ).select('-password');
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    res.status(200).json({ message: 'Permissions updated successfully.', user: updatedUser });
+  } catch (err) {
+    console.error('Update Permissions Error:', err);
+    res.status(500).json({ message: 'Failed to update user permissions.' });
+  }
+};
+
+/**
+ * @desc    Check a user's permissions
+ * @route   POST /users/permissions/:username
+ * @access  Admin
+ */
+const checkPermissions = async (req, res) => {
+  try {
+    const { username } = req.params;
+    const user = await User.findOne({ name: username });
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    // Filter out default permissions if needed, as in your original code
+    const filteredPermissions = (user.permissions || []).filter(
+      (perm) => perm !== 'Dashboard' && perm !== 'MyInfo'
+    );
+
+    res.status(200).json({
+      message: 'Permissions fetched successfully.',
+      permissions: filteredPermissions,
+    });
+
+  } catch (err) {
+    console.error('Check Permissions Error:', err);
+    res.status(500).json({ message: "Failed to fetch permissions." });
+  }
+};
 
 module.exports = {
   registerUser,
   loginUser,
-  getUserByEmail,
-  getUsers,
-  getAdmin,
   logoutUser,
-  allowUser,
+  getUsers,
   getrequest,
   getapprovedrequest,
   getdeniedrequest,
+  allowUser,
   deleteUser,
   userAccess,
-  getAdminWrapper,
   checkPermissions,
   me,
   addUser,
-  updateUserDetails
+  updateUserDetails,
 };

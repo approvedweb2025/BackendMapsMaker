@@ -1,4 +1,4 @@
-// allowedEmail.js
+// config/allowedEmails.js
 const allowedEmails = [
     'mhuzaifa8519@gmail.com',
     'mhuzaifa86797@gmail.com',

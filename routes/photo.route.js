@@ -5,7 +5,6 @@ const router = express.Router();
 const {
   // Syncing and Processing
   syncImages,
-  processSyncQueue, // ✅ Naya background processor function
 
   // Data Serving
   getPhotos,
@@ -31,10 +30,6 @@ const {
 // ✅ TRIGGER SYNC: Yeh route user ki request par call hota hai.
 // Yeh sirf Google Drive se file list fetch karke queue banata hai.
 router.get('/sync-images', syncImages);
-
-// ✅ PROCESS QUEUE: Yeh route Vercel Cron Job se har minute call hoga.
-// Yeh background mein queue se images ko chote batches mein process karta hai.
-router.get('/process-queue', processSyncQueue);
 
 
 // ==========================================================

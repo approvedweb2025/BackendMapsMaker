@@ -1,3 +1,8 @@
+const express = require('express');
+const router = express.Router();
+const userController = require('../controllers/user.controller');
+const { protect, adminOnly } = require('../middleware/authMiddleware');
+
 // routes/user.route.js
 const express = require('express');
 const router = express.Router();
@@ -20,12 +25,15 @@ const {
 const { authMiddleware, isAdmin } = require('../middlewares/authMiddleware');
 
 // Public routes
-router.post('/register', registerUser);
-router.post('/login', loginUser);
-router.post('/logout', logoutUser);
+rrouter.post('/register', userController.registerUser);
+router.post('/login', userController.loginUser);
+router.post('/logout', userController.logoutUser);
 
 // Protected Routes (user must be logged in)
-router.get('/me', authMiddleware, me);
+router.get('/me', protect, userController.me);
+
+// Admin Only Route (sirf admin ke liye)
+router.get('/', protect, adminOnly, userController.getUsers);
 router.put('/user/:id', authMiddleware, updateUserDetails);
 
 // Admin Only Routes

@@ -1,78 +1,42 @@
-
-
-// routes/userRoutes.js
+// routes/user.route.js
 const express = require('express');
+const router = express.Router();
 const {
   registerUser,
   loginUser,
-  getUsers,
   logoutUser,
-  getUserByEmail,
+  getUsers,
   getrequest,
-  allowUser,
   getapprovedrequest,
   getdeniedrequest,
-  getAdmin,
+  allowUser,
   deleteUser,
   userAccess,
-  getAdminWrapper,
   checkPermissions,
   me,
   addUser,
   updateUserDetails,
-
 } = require('../controllers/user.controller');
 const { authMiddleware, isAdmin } = require('../middlewares/authMiddleware');
 
-const router = express.Router();
-
-// Register user
+// Public routes
 router.post('/register', registerUser);
-
-// Get Pending Requests
-router.get('/getrequest', getrequest)
-
-// Get Approved Requests
-router.get('/approved-request', getapprovedrequest)
-
-// Get Denied Requests
-router.get('/denied-request', getdeniedrequest)
-
-// Login user
 router.post('/login', loginUser);
-
-// allow or denied User
-router.post('/status', allowUser);
-
-// Logout User
 router.post('/logout', logoutUser);
 
-// Get User By email
-router.get('/getuserbyemail', getUserByEmail)
+// Protected Routes (user must be logged in)
+router.get('/me', authMiddleware, me);
+router.put('/user/:id', authMiddleware, updateUserDetails);
 
-// Get all users
-router.post('/getadmin', getAdmin);
-
-// User Pages Access
-router.post('/give-access/:username', userAccess)
-
-// Delete User
-router.delete('/delete/:id', deleteUser)
-
-// Get all users
-router.get('/', getUsers);
-
-// Get Admin Wrapper
-router.post('/getadminwrapper', getAdminWrapper);
-
-// Get User Permissions
-router.post('/permissions/:username', checkPermissions);
-
-router.get('/me', authMiddleware, me)
-
-router.post('/userbyadmin', addUser)
-
-router.put('/user/:id', authMiddleware, isAdmin, updateUserDetails);
-
+// Admin Only Routes
+router.get('/', authMiddleware, isAdmin, getUsers);
+router.get('/getrequest', authMiddleware, isAdmin, getrequest);
+router.get('/approved-request', authMiddleware, isAdmin, getapprovedrequest);
+router.get('/denied-request', authMiddleware, isAdmin, getdeniedrequest);
+router.post('/status', authMiddleware, isAdmin, allowUser);
+router.delete('/delete/:id', authMiddleware, isAdmin, deleteUser);
+router.post('/give-access/:username', authMiddleware, isAdmin, userAccess);
+router.post('/permissions/:username', authMiddleware, isAdmin, checkPermissions);
+router.post('/userbyadmin', authMiddleware, isAdmin, addUser);
 
 module.exports = router;

@@ -8,25 +8,27 @@ const photoRoutes = require('./routes/photo.route.js');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
-const Image = require('./models/Image.model.js');
+
+// Environment variables ko load karein (sabse pehle)
+dotenv.config();
 
 // Passport configuration ko import karein
 require('./auth/google.js');
-
-// Environment variables ko load karein
-dotenv.config();
 
 // Express app ko initialize karein
 const app = express();
 
 // Middlewares
+// CORS ko pehle rakhein
 app.use(cors({
   origin: process.env.FRONTEND_URL,
   credentials: true,
 }));
 
+app.use(express.json());
 app.use(cookieParser());
 
+// Express Session
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
@@ -38,31 +40,20 @@ app.use(session({
   }
 }));
 
+// Passport Middleware
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.use(express.json());
-
-// Routes
+// API Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
-// Test API Route
-app.get('/api/images', async (req, res) => {
-  try {
-    const images = await Image.find({ latitude: { $ne: null }, longitude: { $ne: null } }).select('-imageData');
-    res.json(images);
-  } catch (err) {
-    console.error('Failed to fetch images:', err.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+// Root route
+app.get('/', (req, res) => {
+  res.send('<h1>Backend is running!</h1><a href="/auth/google">Continue With Google</a>');
 });
 
 // Google Auth Routes
-app.get('/', (req, res) => {
-  res.send('<a href="/auth/google">Continue With Google</a>');
-});
-
 app.get('/auth/google',
   passport.authenticate('google', {
     scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.readonly'],
@@ -73,7 +64,7 @@ app.get('/auth/google',
 
 app.get('/gtoken',
   passport.authenticate('google', {
-    failureRedirect: `${process.env.FRONTEND_URL}/home`,
+    failureRedirect: `${process.env.FRONTEND_URL}/login?error=auth_failed`,
     successRedirect: '/photos/sync-images',
   })
 );
@@ -81,16 +72,21 @@ app.get('/gtoken',
 app.get('/logout', (req, res, next) => {
   req.logout(function(err) {
     if (err) { return next(err); }
-    res.redirect('/');
+    res.redirect(`${process.env.FRONTEND_URL}/login`);
   });
 });
 
-// Vercel ke liye async handler function
+// Vercel ke liye Serverless Function Handler
 const handler = async (req, res) => {
-  // Har request se pehle database connection yaqeenan banayein
-  await connectDB();
-  return app(req, res);
+  try {
+    // Har request se pehle database connection yaqeeni banayein
+    await connectDB();
+    // Express app ko call karein
+    return app(req, res);
+  } catch (error) {
+    console.error('[HANDLER_ERROR]', error);
+    res.status(500).json({ error: 'An internal server error occurred.' });
+  }
 };
 
-// Vercel ke liye handler ko export karein
 module.exports = handler;

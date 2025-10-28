@@ -1,5 +1,4 @@
 // index.js
-
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
@@ -29,7 +28,7 @@ app.use(cors({
 app.use(cookieParser());
 
 app.use(session({
-  secret: process.env.SESSION_SECRET, // Yeh Vercel env mein hona zaroori hai
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -48,6 +47,17 @@ app.use(express.json());
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
+// Test API Route
+app.get('/api/images', async (req, res) => {
+  try {
+    const images = await Image.find({ latitude: { $ne: null }, longitude: { $ne: null } }).select('-imageData');
+    res.json(images);
+  } catch (err) {
+    console.error('Failed to fetch images:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Google Auth Routes
 app.get('/', (req, res) => {
   res.send('<a href="/auth/google">Continue With Google</a>');
@@ -55,7 +65,7 @@ app.get('/', (req, res) => {
 
 app.get('/auth/google',
   passport.authenticate('google', {
-    scope: [ 'profile', 'email', 'https://www.googleapis.com/auth/drive.readonly' ],
+    scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.readonly'],
     accessType: 'offline',
     prompt: 'consent'
   })
@@ -69,34 +79,17 @@ app.get('/gtoken',
 );
 
 app.get('/logout', (req, res, next) => {
-  req.logout(err => {
-    if (err) return next(err);
+  req.logout(function(err) {
+    if (err) { return next(err); }
     res.redirect('/');
   });
 });
 
-// Test API
-app.get('/api/images', async (req, res) => {
-  try {
-    const images = await Image.find({ latitude: { $ne: null }, longitude: { $ne: null } }).select('-imageData');
-    res.json(images);
-  } catch (err) {
-    console.error('Failed to fetch images:', err.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Vercel ke liye async handler function banayein
+// Vercel ke liye async handler function
 const handler = async (req, res) => {
-  try {
-    // Har request se pehle database connection check karein
-    await connectDB();
-    // App ko request handle karne dein
-    return app(req, res);
-  } catch (error) {
-    console.error('Handler error:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
+  // Har request se pehle database connection yaqeenan banayein
+  await connectDB();
+  return app(req, res);
 };
 
 // Vercel ke liye handler ko export karein

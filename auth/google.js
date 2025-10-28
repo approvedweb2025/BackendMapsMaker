@@ -1,10 +1,10 @@
+// auth/google.js
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-require('dotenv').config();
 const axios = require('axios');
-const { allowedEmails } = require('../config/allowedEmail');
+const { allowedEmails } = require('../config/allowedEmails');
 
-// Only initialize Google OAuth if credentials are provided
+// Agar credentials maujood hon tabhi Google Strategy ko initialize karein
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   passport.use(new GoogleStrategy({
       clientID: process.env.GOOGLE_CLIENT_ID,
@@ -12,7 +12,6 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       callbackURL: process.env.CALLBACK_URL,
       accessType: 'offline',
       prompt: 'consent',
-      includeGrantedScopes: true,
       passReqToCallback: true
   },
     async function (req, accessToken, refreshToken, profile, done) {
@@ -23,26 +22,24 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                 return done(null, false, { message: 'Unauthorized email' });
             }
 
-            // optional token info
-            await axios.get(`https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`);
-
+            // User object banayein jo session mein store hoga
             const user = {
                 displayName: profile.displayName,
                 email,
                 accessToken,
-                refreshToken
+                refreshToken: refreshToken || null // Refresh token har baar nahi milta
             };
 
             return done(null, user);
 
         } catch (error) {
             console.error('❌ Error in GoogleStrategy:', error.response?.data || error.message);
-            return done(error);
+            return done(error, null);
         }
     }
   ));
 } else {
-  console.log('⚠️ Google OAuth credentials not provided, skipping Google authentication setup');
+  console.log('⚠️ Google OAuth credentials not provided, skipping Google authentication setup.');
 }
 
 passport.serializeUser((user, done) => {

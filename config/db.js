@@ -1,62 +1,30 @@
 // config/db.js
+
 const mongoose = require('mongoose');
-const { initGridFS } = require('./gridfs'); // Ensure this path is correct
 
-const MONGO_URI = process.env.MONGO_URI;
+// Connection state ko track karne ke liye variable
+let isConnected = false;
 
-if (!MONGO_URI) {
-  throw new Error(
-    'Please define the MONGO_URI environment variable inside .env.local or in Vercel settings'
-  );
-}
-
-/**
- * Global is used here to maintain a cached connection across hot reloads
- * in development. This prevents connections growing exponentially
- * during API Route usage.
- * In a serverless environment, this caches the connection between function invocations.
- */
-let cached = global.mongoose;
-
-if (!cached) {
-  cached = global.mongoose = { conn: null, promise: null };
-}
-
-async function connectDB() {
-  // If we have a cached connection, reuse it
-  if (cached.conn) {
-    console.log('✅ Using cached MongoDB connection.');
-    return cached.conn;
-  }
-
-  // If there's no cached promise, create a new connection promise
-  if (!cached.promise) {
-    const opts = {
-      bufferCommands: false, // Recommended for serverless
-      serverSelectionTimeoutMS: 10000, // 10 second timeout
-    };
-
-    console.log('⚡ Creating new MongoDB connection...');
-    cached.promise = mongoose.connect(MONGO_URI, opts).then((mongooseInstance) => {
-      return mongooseInstance;
-    });
+const connectDB = async () => {
+  // Agar pehle se connected hai to dobara connect na karein
+  if (isConnected) {
+    console.log('MongoDB is already connected.');
+    return;
   }
 
   try {
-    // Await the promise to get the connection instance
-    cached.conn = await cached.promise;
-    console.log(`✅ MongoDB Connected: ${cached.conn.connection.host}`);
-    
-    // 🆕 Initialize GridFS right after the connection is established
-    initGridFS();
-
-    return cached.conn;
-  } catch (e) {
-    // If the connection fails, reset the cached promise and throw the error
-    cached.promise = null;
-    console.error('❌ MongoDB connection error:', e);
-    throw new Error('Failed to connect to the database.');
+    const conn = await mongoose.connect(process.env.MONGO_URI, {
+      // Yeh options connection ko behtar banate hain
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    isConnected = true;
+    console.log(`MongoDB Connected: ${conn.connection.host}`);
+  } catch (error) {
+    console.error(`Error connecting to MongoDB: ${error.message}`);
+    // Process ko exit na karein, balki error throw karein taaki Vercel logs mein nazar aaye
+    throw new Error('Database connection failed');
   }
-}
+};
 
 module.exports = connectDB;

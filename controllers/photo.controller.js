@@ -1,53 +1,25 @@
+// controllers/photo.controller.js
+
 const axios = require('axios');
 const exifr = require('exifr');
 const Image = require('../models/Image.model');
+const SyncQueue = require('../models/SyncQueue.model'); // ✅ Naya model import karein
 
-// ✅ MODIFIED: Downloads a file from Google Drive directly into a memory buffer.
-const downloadFileToBuffer = async (fileId, accessToken) => {
-  const response = await axios.get(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      responseType: 'arraybuffer' // Crucial: tells axios to receive binary data as a buffer
-    }
-  );
-  return Buffer.from(response.data, 'binary');
-};
+// ... downloadFileToBuffer aur getPlaceDetails functions waise hi rahenge ...
+const downloadFileToBuffer = async (fileId, accessToken) => { /* ... no change ... */ };
+const getPlaceDetails = async (lat, lng) => { /* ... no change ... */ };
 
-// ✅ Reverse Geocoding via Google API (No changes needed)
-const getPlaceDetails = async (lat, lng) => {
-  try {
-    const res = await axios.get("https://maps.googleapis.com/maps/api/geocode/json", {
-      params: { latlng: `${lat},${lng}`, key: process.env.GOOGLE_GEOCODING_API_KEY }
-    });
 
-    if (res.data.status === "OK" && res.data.results.length > 0) {
-      const components = res.data.results[0].address_components;
-      const extract = (type) => components.find((c) => c.types.includes(type))?.long_name || "";
-
-      return {
-        district: extract("administrative_area_level_2") || extract("administrative_area_level_1") || "",
-        tehsil: extract("administrative_area_level_3") || extract("sublocality_level_1") || "",
-        village: extract("locality") || extract("sublocality") || extract("neighborhood") || "",
-        country: extract("country") || ""
-      };
-    }
-    return { district: "", tehsil: "", village: "", country: "" };
-  } catch (err) {
-    console.error("❌ Geocode error:", err.message);
-    return { district: "", tehsil: "", village: "", country: "" };
-  }
-};
-
-// ✅ MODIFIED: Syncs Google Drive images directly to the database.
+// ✅ MODIFIED: syncImages ab sirf queue banayega
 const syncImages = async (req, res) => {
   if (!req.isAuthenticated()) return res.status(401).send('Not authenticated');
-  const accessToken = req.user.accessToken;
+  const { accessToken, email } = req.user;
 
   try {
     let files = [];
     let nextPageToken = null;
 
+    // Sirf file list fetch karein
     do {
       const driveResponse = await axios.get('https://www.googleapis.com/drive/v3/files', {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -57,193 +29,125 @@ const syncImages = async (req, res) => {
           pageToken: nextPageToken
         }
       });
-
       files.push(...(driveResponse.data.files || []));
       nextPageToken = driveResponse.data.nextPageToken;
     } while (nextPageToken);
 
-    console.log(`✅ Total files fetched: ${files.length}`);
+    console.log(`✅ Fetched ${files.length} file IDs to be queued.`);
 
+    // Har file ko queue mein daalein
     for (const file of files) {
-      try {
-        const exists = await Image.findOne({ fileId: file.id });
-        if (exists) continue;
+      // Check karein ki image pehle se process toh nahi ho chuki
+      const imageExists = await Image.findOne({ fileId: file.id });
+      if (imageExists) continue;
 
-        // Download image from Google Drive into a buffer
-        const imageBuffer = await downloadFileToBuffer(file.id, accessToken);
+      // Queue mein daalne se pehle check karein ki wahan pehle se toh nahi hai
+      await SyncQueue.updateOne(
+        { fileId: file.id },
+        {
+          $set: {
+            name: file.name,
+            mimeType: file.mimeType,
+            createdTime: file.createdTime,
+            uploadedBy: email,
+            accessToken: accessToken, // Har item ke saath token save karein
+            status: 'pending'
+          }
+        },
+        { upsert: true } // Agar nahi hai toh create karega, hai toh update karega
+      );
+    }
+
+    // Foran user ko redirect kar dein
+    res.redirect(`${process.env.FRONTEND_URL}?sync=started`);
+
+  } catch (err) {
+    console.error('❌ Error starting sync:', err);
+    res.status(500).redirect(`${process.env.FRONTEND_URL}?sync=failed`);
+  }
+};
+
+
+// ✅ NEW FUNCTION: Background mein queue ko process karega
+const processSyncQueue = async (req, res) => {
+  // Security: Yeh endpoint sirf Vercel Cron Job se call hona chahiye
+  // Aap Vercel env mein ek SECRET set kar sakte hain
+  if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).send('Unauthorized');
+  }
+
+  const BATCH_LIMIT = 5; // Ek baar mein kitni images process karni hain
+
+  try {
+    const itemsToProcess = await SyncQueue.find({ status: 'pending' }).limit(BATCH_LIMIT);
+
+    if (itemsToProcess.length === 0) {
+      return res.status(200).json({ message: 'Queue is empty. Nothing to process.' });
+    }
+
+    console.log(`Processing ${itemsToProcess.length} items from the queue...`);
+
+    for (const item of itemsToProcess) {
+      try {
+        // Asal image processing logic yahan hai
+        const imageBuffer = await downloadFileToBuffer(item.fileId, item.accessToken);
 
         let latitude = null, longitude = null;
-        let timestamp = new Date(file.createdTime || Date.now());
+        let timestamp = new Date(item.createdTime || Date.now());
 
         try {
-          if (['image/jpeg', 'image/jpg', 'image/tiff'].includes(file.mimeType)) {
-            // Parse EXIF data directly from the buffer
             const exifData = await exifr.parse(imageBuffer);
             if (exifData) {
               latitude = exifData.latitude || null;
               longitude = exifData.longitude || null;
-              if (exifData.DateTimeOriginal) {
-                timestamp = new Date(exifData.DateTimeOriginal);
-              }
+              if (exifData.DateTimeOriginal) timestamp = new Date(exifData.DateTimeOriginal);
             }
-          }
-        } catch (err) {
-          console.warn(`⚠️ EXIF error for ${file.name}:`, err.message);
+        } catch (exifErr) {
+            console.warn(`⚠️ EXIF error for ${item.name}:`, exifErr.message);
         }
 
-        let placeDetails = { district: "", tehsil: "", village: "", country: "" };
+        let placeDetails = {};
         if (latitude && longitude) {
-          placeDetails = await getPlaceDetails(latitude, longitude);
+            placeDetails = await getPlaceDetails(latitude, longitude);
         }
 
-        // Create a new document in the database with the image data
         await Image.create({
-          fileId: file.id,
-          name: file.name,
-          mimeType: file.mimeType,
-          imageData: imageBuffer, // ✅ Save the image buffer directly
+          fileId: item.fileId,
+          name: item.name,
+          mimeType: item.mimeType,
+          imageData: imageBuffer,
           latitude,
           longitude,
           timestamp,
-          uploadedBy: req.user.email,
+          uploadedBy: item.uploadedBy,
           lastCheckedAt: new Date(),
           ...placeDetails
         });
+
+        // Process hone ke baad queue se delete kar dein
+        await SyncQueue.deleteOne({ _id: item._id });
+
       } catch (fileErr) {
-        console.error(`❌ Error processing file ${file.name}:`, fileErr.message);
+        console.error(`❌ Error processing file ${item.name}:`, fileErr.message);
+        // Agar fail ho toh status update kar dein taaki dobara try na ho
+        await SyncQueue.updateOne({ _id: item._id }, { $set: { status: 'failed' } });
       }
     }
 
-    res.redirect(`${process.env.FRONTEND_URL}/home`);
+    res.status(200).json({ message: `Successfully processed ${itemsToProcess.length} items.` });
+
   } catch (err) {
-    console.error('❌ Sync error:', err);
-    res.status(500).send('Failed to sync images');
-  }
-};
-
-// ✅ Get all photo metadata (excluding the large image buffer for performance)
-const getPhotos = async (req, res) => {
-  try {
-    const photos = await Image.find().select('-imageData').sort({ createdAt: -1 });
-    res.status(200).json({ photos });
-  } catch (err) {
-    res.status(500).json({ error: 'Something went wrong' });
-  }
-};
-
-// ✅ NEW: Get a single image's binary data by its database ID
-const getImageDataById = async (req, res) => {
-  try {
-    const image = await Image.findById(req.params.id);
-    if (!image || !image.imageData) {
-      return res.status(404).send('Image not found');
-    }
-    // Set the correct content-type header and send the binary data
-    res.set('Content-Type', image.mimeType);
-    res.send(image.imageData);
-  } catch (err) {
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('❌ Error in queue processor:', err);
+    res.status(500).json({ error: 'Queue processing failed' });
   }
 };
 
 
-// --- STATS AND OTHER HELPERS (No major changes needed below) ---
-
-
-// ✅ Monthly Stats (month + uploader + count)
-const getImageStatsByMonth = async (req, res) => {
-  try {
-    const monthlyStats = await Image.aggregate([
-      { $group: { _id: { month: { $dateToString: { format: "%Y-%m", date: "$timestamp" } }, uploadedBy: "$uploadedBy" }, count: { $sum: 1 } } },
-      { $project: { month: "$_id.month", uploadedBy: "$_id.uploadedBy", count: 1, _id: 0 } },
-      { $sort: { month: 1 } }
-    ]);
-    const uniqueUploaders = [...new Set(monthlyStats.map((s) => s.uploadedBy).filter(Boolean))];
-    res.status(200).json({ stats: monthlyStats, uniqueUploaders });
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to get monthly stats', error: err.message });
-  }
-};
-
-// ✅ Yearly Stats
-const getImageStatsByYear = async (req, res) => {
-  try {
-    const yearlyStats = await Image.aggregate([
-      { $group: { _id: { year: { $dateToString: { format: "%Y", date: "$timestamp" } }, uploadedBy: "$uploadedBy" }, count: { $sum: 1 } } },
-      { $project: { year: "$_id.year", uploadedBy: "$_id.uploadedBy", count: 1, _id: 0 } },
-      { $sort: { year: 1 } }
-    ]);
-    res.status(200).json({ stats: yearlyStats });
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to get yearly stats', error: err.message });
-  }
-};
-
-// ✅ Daily Stats
-const getImageStatsByDay = async (req, res) => {
-  try {
-    const dailyStats = await Image.aggregate([
-      { $group: { _id: { date: { $dateToString: { format: "%Y-%m-%d", date: "$timestamp" } }, uploadedBy: "$uploadedBy" }, count: { $sum: 1 } } },
-      { $project: { date: "$_id.date", uploadedBy: "$_id.uploadedBy", count: 1, _id: 0 } },
-      { $sort: { date: 1 } }
-    ]);
-    res.status(200).json({ stats: dailyStats });
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to get daily stats', error: err.message });
-  }
-};
-
-// ✅ Other helpers
-const getImagesByUploadedBy = async (req, res) => {
-  try {
-    const { uploadedBy } = req.params;
-    const photos = await Image.find({ uploadedBy }).select('-imageData');
-    res.status(200).json({ photos });
-  } catch (err) {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-const getFirstEmailImage = async (req, res) => {
-  try {
-    const email = 'mhuzaifa8519@gmail.com';
-    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } }).select('-imageData');
-    res.status(200).json(images);
-  } catch {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-const getSecondEmailImage = async (req, res) => {
-  try {
-    const email = 'mhuzaifa86797@gmail.com';
-    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } }).select('-imageData');
-    res.status(200).json(images);
-  } catch {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-const getThirdEmailImage = async (req, res) => {
-  try {
-    const email = 'muhammadjig8@gmail.com';
-    const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } }).select('-imageData');
-    res.status(200).json(images);
-  } catch {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-
+// Apne module.exports ko update karein
 module.exports = {
   syncImages,
+  processSyncQueue, // ✅ Naya function export karein
   getPhotos,
-  getImageDataById, // Make sure to export the new function
-  getImageStatsByMonth,
-  getImageStatsByYear,
-  getImageStatsByDay,
-  getImagesByUploadedBy,
-  getFirstEmailImage,
-  getSecondEmailImage,
-  getThirdEmailImage
+  getImageDataById,
+  // ... baaki saare exports
 };

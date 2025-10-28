@@ -4,20 +4,9 @@
     {
       "src": "index.js",
       "use": "@vercel/node"
-    },
-    {
-      "src": "api/cron/process-queue.js",
-      "use": "@vercel/node"
     }
   ],
   "routes": [
-    { "src": "/api/cron/process-queue", "dest": "/api/cron/process-queue.js" },
     { "src": "/(.*)", "dest": "index.js" }
-  ],
-  "crons": [
-    {
-      "path": "/api/cron/process-queue",
-      "schedule": "*/1 * * * *"
-    }
   ]
 }

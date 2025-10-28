@@ -2,7 +2,8 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const axios = require('axios');
-const { allowedEmails } = require('../config/allowedEmails');
+// YAHAN PAR TABDEELI KI GAYI HAI
+const { allowedEmails } = require('../config/allowedEmail');
 
 // Agar credentials maujood hon tabhi Google Strategy ko initialize karein
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {

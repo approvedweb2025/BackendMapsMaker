@@ -1,89 +1,60 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const mongoose = require('mongoose');
-const connectDB = require('./config/db');
-const userRoutes = require('./routes/user.route.js');
-const photoRoutes = require('./routes/photo.route.js');
+const connectDB = require('../config/db'); // Adjusted path
+const userRoutes = require('../routes/user.route.js'); // Adjusted path
+const photoRoutes = require('../routes/photo.route.js'); // Adjusted path
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
+const MongoStore = require('connect-mongo'); // ✅ Import connect-mongo
 const path = require('path');
 const fs = require('fs');
-const MongoStore = require('connect-mongo'); // ✅ Step 1: Import MongoStore
+const Image = require('../models/Image.model.js'); // Adjusted path
 
-require('./auth/google.js');
+require('../auth/google.js'); // Adjusted path
 
 dotenv.config();
-
-// Connect to DB
 connectDB();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// ✅ Allowed Origins for CORS
-const allowedOrigins = [
-  "http://localhost:5173",
-  "https://maps-maker-frontend-8ntc.vercel.app",
-  process.env.FRONTEND_URL // Make sure this is set in Vercel
-].filter(Boolean);
-
+// ✅ Middlewares
 app.use(cors({
-  origin: allowedOrigins,
+  origin: process.env.FRONTEND_URL, // ✅ Use environment variable for production URL
   credentials: true,
 }));
 
-// ✅ Step 2: Trust proxy for Vercel's environment
-// This is crucial for secure cookies to work correctly behind a reverse proxy.
-app.set('trust proxy', 1);
-
-// ✅ Middlewares
 app.use(cookieParser());
 
-// ✅ Step 3: Update Session Configuration
+// ✅ Session configuration with MongoStore
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'mysecret',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  // Store sessions in MongoDB instead of memory
   store: MongoStore.create({
-    mongoUrl: process.env.MONGO_URI,
-    ttl: 14 * 24 * 60 * 60, // Session Time-to-Live: 14 days
+    mongoUrl: process.env.MONGO_URI, // Your MongoDB connection string
+    ttl: 14 * 24 * 60 * 60, // = 14 days. Default
     autoRemove: 'native'
   }),
   cookie: {
-    // secure: true in production (HTTPS), false otherwise
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === 'production', // ✅ Set to true in production (https)
     httpOnly: true,
-    // Required for cross-domain cookies (frontend on one domain, backend on another)
-    sameSite: process.env.NODE_ENV === "production" ? 'none' : 'lax',
-    maxAge: 24 * 60 * 60 * 1000 // 1 day
+    maxAge: 24 * 60 * 60 * 1000, // 1 day
+    sameSite: 'lax'
   }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
+
 app.use(express.json());
 
-
-// ✅ Routes (The rest of your file remains the same)
+// Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
-// ... (Your other routes like health checks, Google Auth, etc., remain unchanged)
-// ... (I am omitting the rest of your file for brevity, but you should keep it)
-
-// Health check route
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// Google Auth routes
+// Google Auth
 app.get('/', (req, res) => {
   res.send('<a href="/auth/google">Continue With Google</a>');
 });
@@ -101,34 +72,40 @@ app.get('/auth/google',
 );
 
 app.get('/gtoken',
-  passport.authenticate('google', { failureRedirect: `${process.env.FRONTEND_URL}/login-failed` }), // Redirect to frontend on failure
-  (req, res) => {
-    // After successful authentication, the session is established.
-    // Redirect the user back to your frontend.
-    res.redirect(process.env.FRONTEND_URL); // e.g., https://maps-maker-frontend-8ntc.vercel.app
-  }
+  passport.authenticate('google', {
+    // ✅ Use FRONTEND_URL for redirects
+    failureRedirect: `${process.env.FRONTEND_URL}/login-failure`,
+    successRedirect: `${process.env.FRONTEND_URL}/home`, // Redirect to frontend after sync
+  })
 );
+
+// Redirect to sync after successful login
+app.get('/auth/success', (req, res) => {
+    if (req.isAuthenticated()) {
+        res.redirect('/photos/sync-images');
+    } else {
+        res.redirect(`${process.env.FRONTEND_URL}/login-failure`);
+    }
+});
+
 
 app.get('/logout', (req, res, next) => {
   req.logout(err => {
     if (err) return next(err);
-    res.redirect(process.env.FRONTEND_URL || '/');
+    res.redirect('/');
   });
 });
 
-// ... (keep all your other API and test routes)
-
-// ✅ Catch-all
-app.use((req, res) => {
-  res.status(404).json({ error: "Route not found" });
+// Test API for images
+app.get('/api/images', async (req, res) => {
+  try {
+    const images = await Image.find({ latitude: { $ne: null }, longitude: { $ne: null } });
+    res.json(images);
+  } catch (err) {
+    console.error('Failed to fetch images:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Export the app for Vercel
 module.exports = app;
-
-// Only start server if not in Vercel environment
-if (process.env.VERCEL !== '1') {
-  app.listen(PORT, () => {
-    console.log(`✅ Server is running on http://localhost:${PORT}`);
-  });
-}

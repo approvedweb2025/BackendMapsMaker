@@ -1,11 +1,12 @@
-// models/User.js
+// models/user.model.js
 const mongoose = require('mongoose');
 
-const userSchema = new mongoose.Schema(
-  {
+const userSchema = new mongoose.Schema({
     name: {
       type: String,
       required: [true, 'Please enter a name'],
+      unique: true,
+      trim: true,
     },
     email: {
       type: String,
@@ -29,10 +30,10 @@ const userSchema = new mongoose.Schema(
       enum: ['approved', 'denied', 'pending'],
       default: 'pending',
     },
-    permissions: [String], // Example: ['dashboard', 'settings']  
+    permissions: [String], // Example: ['Dashboard', 'MyInfo']  
   },
   {
-    timestamps: true, // adds createdAt and updatedAt
+    timestamps: true,
   }
 );
 

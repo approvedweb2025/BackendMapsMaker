@@ -1,39 +1,39 @@
+// index.js
+
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const connectDB = require('./config/db'); // Path ko check kar lein
-const userRoutes = require('./routes/user.route.js'); // Path ko check kar lein
-const photoRoutes = require('./routes/photo.route.js'); // Path ko check kar lein
+const connectDB = require('./config/db');
+const userRoutes = require('./routes/user.route.js');
+const photoRoutes = require('./routes/photo.route.js');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
-const Image = require('./models/Image.model.js'); // Path ko check kar lein
+const Image = require('./models/Image.model.js');
 
 // Passport configuration ko import karein
-require('./auth/google.js'); // Path ko check kar lein
+require('./auth/google.js');
 
 // Environment variables ko load karein
 dotenv.config();
 
-// Database se connect karein
-connectDB();
-
+// Express app ko initialize karein
 const app = express();
 
 // Middlewares
 app.use(cors({
-  origin: process.env.FRONTEND_URL, // Vercel environment variable se URL set karein
+  origin: process.env.FRONTEND_URL,
   credentials: true,
 }));
 
 app.use(cookieParser());
 
 app.use(session({
-  secret: process.env.SESSION_SECRET, // Isko Vercel env variables mein zaroor set karein
+  secret: process.env.SESSION_SECRET, // Yeh Vercel env mein hona zaroori hai
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // Production mein secure cookie
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000 // 1 din
   }
@@ -55,11 +55,7 @@ app.get('/', (req, res) => {
 
 app.get('/auth/google',
   passport.authenticate('google', {
-    scope: [
-      'profile',
-      'email',
-      'https://www.googleapis.com/auth/drive.readonly'
-    ],
+    scope: [ 'profile', 'email', 'https://www.googleapis.com/auth/drive.readonly' ],
     accessType: 'offline',
     prompt: 'consent'
   })
@@ -90,5 +86,18 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
-// Vercel ke liye app ko export karein
-module.exports = app;
+// Vercel ke liye async handler function banayein
+const handler = async (req, res) => {
+  try {
+    // Har request se pehle database connection check karein
+    await connectDB();
+    // App ko request handle karne dein
+    return app(req, res);
+  } catch (error) {
+    console.error('Handler error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+// Vercel ke liye handler ko export karein
+module.exports = handler;

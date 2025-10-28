@@ -23,16 +23,18 @@ app.use(cors({
   credentials: true,
 }));
 
-app.use(cookieParser());
+app.set('trust proxy', 1); 
 
 app.use(session({
-  secret: process.env.SESSION_SECRET, // ❗️ Isko .env se set karein
+  secret: process.env.SESSION_SECRET, // Yeh Vercel variables mein set hona chahiye
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true, // ✅ Production mein 'true' rakhein
-    httpOnly: true,
-    sameSite: 'none' // ✅ Cross-origin requests ke liye zaroori
+    // Production environment ke liye settings
+    secure: true,           // Sirf HTTPS par cookie bhejein
+    httpOnly: true,         // Client-side JavaScript se cookie access na ho
+    sameSite: 'none',       // Cross-domain requests ke liye ijazat dein
+    maxAge: 24 * 60 * 60 * 1000 // 1 din
   }
 }));
 

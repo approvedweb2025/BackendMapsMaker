@@ -1,4 +1,5 @@
 // models/SyncQueue.model.js
+
 const mongoose = require('mongoose');
 
 const SyncQueueSchema = new mongoose.Schema({
@@ -10,9 +11,10 @@ const SyncQueueSchema = new mongoose.Schema({
   accessToken: { type: String, required: true },
   status: {
     type: String,
-    enum: ['pending', 'processing', 'failed'],
+    enum: ['pending', 'processing', 'failed', 'completed'],
     default: 'pending'
-  }
-}, { timestamps: true });
+  },
+  errorMessage: { type: String } // Ghalti hone par message store karne ke liye
+}, { timestamps: true }); // createdAt aur updatedAt automatically add ho jayenge
 
 module.exports = mongoose.model('SyncQueue', SyncQueueSchema);

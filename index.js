@@ -1,27 +1,31 @@
-// index.js
+// index.js (Final Hosting-Ready Version)
+
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const connectDB = require('./config/db');
+const connectDB = require('./config/db'); // Database connection function
 const userRoutes = require('./routes/user.route.js');
 const photoRoutes = require('./routes/photo.route.js');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
 
-// Environment variables ko load karein (sabse pehle)
+// Step 1: Environment variables ko sabse pehle load karein
 dotenv.config();
 
-// Passport configuration ko import karein
+// Step 2: Passport ki configuration ko import karein
 require('./auth/google.js');
 
-// Express app ko initialize karein
+// Step 3: Wajahat -> Database se sirf ek baar connect karein, jab server start ho.
+// Yeh har request par connection banane se rokta hai aur app ko crash hone se bachata hai.
+connectDB();
+
+// Step 4: Express app ko initialize karein
 const app = express();
 
-// Middlewares
-// CORS ko pehle rakhein
+// Step 5: Saare zaroori Middlewares ko set karein
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: process.env.FRONTEND_URL, // Sirf aapke frontend ko ijazat dega
   credentials: true,
 }));
 
@@ -34,9 +38,9 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.NODE_ENV === 'production', // Production me cookie sirf HTTPS par kaam karegi
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 1 din
+    maxAge: 24 * 60 * 60 * 1000 // 1 din tak session zinda rahega
   }
 }));
 
@@ -44,17 +48,20 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// API Routes
-app.use('/users', userRoutes);
-app.use('/photos', photoRoutes);
+// Step 6: API Routes ko define karein
+// Wajahat -> Vercel par conflicts se bachne ke liye '/api' prefix istemal karna ek behtareen practice hai.
+// Isse frontend aur backend ke routes aapas me takrate nahi hain.
+app.use('/api/users', userRoutes);
+app.use('/api/photos', photoRoutes);
 
-// Root route
-app.get('/', (req, res) => {
-  res.send('<h1>Backend is running!</h1><a href="/auth/google">Continue With Google</a>');
+// Root API route (sirf testing ke liye, batata hai ke backend chal raha hai)
+app.get('/api', (req, res) => {
+  res.send('<h1>Backend API is running!</h1><a href="/api/auth/google">Continue With Google</a>');
 });
 
-// Google Auth Routes
-app.get('/auth/google',
+// Step 7: Google Authentication ke Routes
+// Login ke liye Google par bhejne wala route
+app.get('/api/auth/google',
   passport.authenticate('google', {
     scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.readonly'],
     accessType: 'offline',
@@ -62,31 +69,25 @@ app.get('/auth/google',
   })
 );
 
-app.get('/gtoken',
+// Wajahat -> Google se wapas aane wala callback route. Aapne iska naam 'gtoken' rakha tha,
+// lekin standard tareeka 'callback' hai. Logic bilkul wahi hai.
+app.get('/api/auth/google/callback',
   passport.authenticate('google', {
     failureRedirect: `${process.env.FRONTEND_URL}/login?error=auth_failed`,
-    successRedirect: '/photos/sync-images',
+    // Kamyabi par seedha sync wale backend route par bhej dein (prefix '/api' ke saath)
+    successRedirect: '/api/photos/sync-images',
   })
 );
 
-app.get('/logout', (req, res, next) => {
+// Logout ka route
+app.get('/api/auth/logout', (req, res, next) => {
   req.logout(function(err) {
     if (err) { return next(err); }
     res.redirect(`${process.env.FRONTEND_URL}/login`);
   });
 });
 
-// Vercel ke liye Serverless Function Handler
-const handler = async (req, res) => {
-  try {
-    // Har request se pehle database connection yaqeeni banayein
-    await connectDB();
-    // Express app ko call karein
-    return app(req, res);
-  } catch (error) {
-    console.error('[HANDLER_ERROR]', error);
-    res.status(500).json({ error: 'An internal server error occurred.' });
-  }
-};
-
-module.exports = handler;
+// Step 8: Wajahat -> Custom 'handler' function ko hata diya gaya hai.
+// Vercel ko sirf 'app' object chahiye, woh baaqi sab khud handle kar leta hai.
+// Yeh sab se ahem tabdeeli (change) hai.
+module.exports = app;

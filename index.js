@@ -16,23 +16,47 @@ dotenv.config();
 
 const app = express();
 
-// Connect to database (non-blocking for serverless)
-connectDB().catch(err => {
-  console.error('Database connection error:', err);
-});
+// Check for required environment variables
+if (!process.env.MONGO_URI) {
+  console.error('❌ MONGO_URI environment variable is not set!');
+  console.error('Please set MONGO_URI in your Vercel environment variables');
+} else {
+  console.log('✅ MONGO_URI is set');
+}
 
-// Middleware to check database connection
-const checkDBConnection = (req, res, next) => {
-  if (mongoose.connection.readyState !== 1) {
-    // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
-    console.warn('Database not connected. State:', mongoose.connection.readyState);
-    // Try to reconnect
-    connectDB().catch(err => {
-      console.error('Reconnection attempt failed:', err);
-    });
-    // Continue anyway - Mongoose will buffer commands
+// Connect to database (non-blocking for serverless)
+if (process.env.MONGO_URI) {
+  connectDB().catch(err => {
+    console.error('Database connection error:', err.message);
+    console.error('Full error:', err);
+  });
+} else {
+  console.error('⚠️  Cannot connect to database - MONGO_URI not set');
+}
+
+// Middleware to check database connection and ensure it's ready
+const checkDBConnection = async (req, res, next) => {
+  try {
+    const state = mongoose.connection.readyState;
+    console.log('DB Connection State:', state, '(0=disconnected, 1=connected, 2=connecting, 3=disconnecting)');
+    
+    if (state !== 1) {
+      console.warn('Database not connected. Attempting to connect...');
+      // Wait for connection with timeout
+      await Promise.race([
+        connectDB(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 10000)
+        )
+      ]);
+      console.log('Database connection established');
+    }
+    next();
+  } catch (error) {
+    console.error('Database connection error in middleware:', error);
+    // Still continue - Mongoose will buffer, but log the error
+    next();
   }
-  next();
 };
 
 // Middlewares
@@ -66,59 +90,82 @@ app.use(cors({
 
 app.set('trust proxy', 1); 
 
-app.use(session({
-  secret: process.env.SESSION_SECRET, // Yeh Vercel variables mein set hona chahiye
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    // Production environment ke liye settings
-    secure: true,           // Sirf HTTPS par cookie bhejein
-    httpOnly: true,         // Client-side JavaScript se cookie access na ho
-    sameSite: 'none',       // Cross-domain requests ke liye ijazat dein
-    maxAge: 24 * 60 * 60 * 1000 // 1 din
-  }
-}));
+// Session configuration - only use if SESSION_SECRET is set
+// For registration/login endpoints, sessions are optional
+if (process.env.SESSION_SECRET) {
+  app.use(session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production', // Only secure in production
+      httpOnly: true,
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
+    }
+  }));
+} else {
+  console.warn('⚠️  SESSION_SECRET not set - sessions disabled');
+}
 
 app.use(cookieParser());
-app.use(passport.initialize());
-app.use(passport.session());
+
+// Passport middleware - only initialize if session is configured
+if (process.env.SESSION_SECRET) {
+  app.use(passport.initialize());
+  app.use(passport.session());
+}
 
 app.use(express.json());
+
+// Request logging middleware (for debugging)
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
 
 // Apply DB connection check to database routes
 app.use('/users', checkDBConnection, userRoutes);
 app.use('/photos', checkDBConnection, photoRoutes);
 
-// Google Auth
+// Google Auth routes - only available if sessions are configured
 app.get('/', (req, res) => {
   res.send('<a href="/auth/google">Continue With Google</a>');
 });
 
-app.get('/auth/google',
-  passport.authenticate('google', {
-    scope: [
-      'profile',
-      'email',
-      'https://www.googleapis.com/auth/drive.readonly'
-    ],
-    accessType: 'offline',
-    prompt: 'consent'
-  })
-);
+if (process.env.SESSION_SECRET && process.env.GOOGLE_CLIENT_ID) {
+  app.get('/auth/google',
+    passport.authenticate('google', {
+      scope: [
+        'profile',
+        'email',
+        'https://www.googleapis.com/auth/drive.readonly'
+      ],
+      accessType: 'offline',
+      prompt: 'consent'
+    })
+  );
 
-app.get('/gtoken',
-  passport.authenticate('google', {
-    failureRedirect: `${process.env.FRONTEND_URL}/home`,
-    successRedirect: '/photos/sync-images', // must exist in photoRoutes
-  })
-);
+  app.get('/gtoken',
+    passport.authenticate('google', {
+      failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/home`,
+      successRedirect: '/photos/sync-images', // must exist in photoRoutes
+    })
+  );
 
-app.get('/logout', (req, res, next) => {
-  req.logout(err => {
-    if (err) return next(err);
-    res.redirect('/');
+  app.get('/logout', (req, res, next) => {
+    if (req.logout) {
+      req.logout(err => {
+        if (err) return next(err);
+        res.redirect('/');
+      });
+    } else {
+      res.redirect('/');
+    }
   });
-});
+} else {
+  console.warn('⚠️  Google Auth routes disabled - SESSION_SECRET or GOOGLE_CLIENT_ID not set');
+}
 
 // ✅ Test API for images
 app.get('/api/images', checkDBConnection, async (req, res) => {

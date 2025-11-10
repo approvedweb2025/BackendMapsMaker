@@ -19,7 +19,7 @@ const app = express();
 // Middlewares
 app.use(cors({
   // ❗️ FRONTEND_URL ko environment variable se lein
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: process.env.FRONTEND_URL || 'https://www.peenaykapani.com',
   credentials: true,
   optionsSuccessStatus: 200
 }));

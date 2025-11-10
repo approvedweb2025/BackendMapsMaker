@@ -21,7 +21,12 @@ app.use(cors({
   // ❗️ FRONTEND_URL ko environment variable se lein
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
+  methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','X-Requested-With']
 }));
+
+// Handle preflight for all routes
+app.options('*', cors());
 
 app.set('trust proxy', 1); 
 
@@ -50,6 +55,11 @@ app.use(express.json());
 // Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
+
+// Health check
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', env: process.env.NODE_ENV || 'development' });
+});
 
 // Google Auth
 app.get('/', (req, res) => {

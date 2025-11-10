@@ -5,11 +5,28 @@ const jwt = require('jsonwebtoken');
 
 // Register a new user
 const registerUser = async (req, res) => {
+  console.log('Registration request received:', { 
+    hasName: !!req.body.name, 
+    hasEmail: !!req.body.email, 
+    hasPassword: !!req.body.password 
+  });
+  
   try {
+    // Check if database is connected
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState !== 1) {
+      console.error('Database not connected. State:', mongoose.connection.readyState);
+      return res.status(503).json({ 
+        message: 'Database connection unavailable',
+        error: 'Please try again in a moment'
+      });
+    }
+
     const { name, email, password } = req.body;
 
     // Validate required fields
     if (!name || !email || !password) {
+      console.log('Validation failed - missing fields');
       return res.status(400).json({ 
         message: 'All fields are required',
         missing: {
@@ -44,9 +61,13 @@ const registerUser = async (req, res) => {
     }
 
     // Hash password
+    console.log('Hashing password...');
     const hashedPassword = await bcrypt.hash(password, 10);
+    console.log('Password hashed successfully');
 
+    console.log('Checking for existing users...');
     const allUsers = await User.find();
+    console.log(`Found ${allUsers.length} existing users`);
 
     let user;
     if (allUsers.length === 0) {
@@ -95,10 +116,25 @@ const registerUser = async (req, res) => {
       });
     }
 
-    // Handle other errors
+    // Handle other errors - always log full error in server logs
+    console.error('Registration error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      code: error.code
+    });
+    
+    // Return error response
     res.status(500).json({ 
-      message: 'Server error', 
-      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message 
+      message: 'Server error during registration',
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Internal server error. Please check server logs.' 
+        : error.message,
+      // Include error details in development
+      ...(process.env.NODE_ENV !== 'production' && {
+        stack: error.stack,
+        name: error.name
+      })
     });
   }
 };

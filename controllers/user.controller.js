@@ -5,145 +5,48 @@ const jwt = require('jsonwebtoken');
 
 // Register a new user
 const registerUser = async (req, res) => {
-  console.log('Registration request received:', { 
-    hasName: !!req.body.name, 
-    hasEmail: !!req.body.email, 
-    hasPassword: !!req.body.password 
-  });
-  
+  const { name, email, password } = req.body;
+
+
   try {
-    const { name, email, password } = req.body;
-
-    // Validate required fields
-    if (!name || !email || !password) {
-      console.log('Validation failed - missing fields');
-      return res.status(400).json({ 
-        message: 'All fields are required',
-        missing: {
-          name: !name,
-          email: !email,
-          password: !password
-        }
-      });
-    }
-
-    // Validate password length
-    if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
-    }
-
-    // Validate email format (basic check)
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ message: 'Invalid email format' });
-    }
-
     // Check if user exists by Email
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: 'User already exists' });
-    }
+    if (existingUser) return res.status(400).json({ message: 'User already exists' });
 
-    // Check if user exists by name
+    // Check if user exists by Email
     const existingUserByname = await User.findOne({ name });
-    if (existingUserByname) {
-      return res.status(400).json({ message: 'Change Your Username, and try again' });
-    }
+    if (existingUserByname) return res.status(400).json({ message: 'Change Your Username, and try again' });
 
     // Hash password
-    console.log('Hashing password...');
     const hashedPassword = await bcrypt.hash(password, 10);
-    console.log('Password hashed successfully');
 
-    console.log('Checking for existing users...');
     const allUsers = await User.find();
-    console.log(`Found ${allUsers.length} existing users`);
 
     let user;
     if (allUsers.length === 0) {
-      // Create admin (first user)
+      // Create admin
       user = await User.create({
         name,
-        email: email.toLowerCase().trim(),
+        email,
         password: hashedPassword,
         role: 'admin',
         statusaccess: 'approved',
       });
     } else {
-      // Create regular user
+
+      // Create user
       user = await User.create({
         name,
-        email: email.toLowerCase().trim(),
+        email,
         password: hashedPassword,
         permissions: ['Dashboard', 'MyInfo']
       });
     }
 
-    // Remove password from response
-    const { password: _, ...userData } = user.toObject();
 
-    res.status(201).json({ 
-      message: 'User registered successfully', 
-      user: userData 
-    });
+    res.status(201).json({ message: 'User registered', user });
   } catch (error) {
-    console.error('Registration error:', error);
-    
-    // Handle MongoDB validation errors
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({ 
-        message: 'Validation error', 
-        errors 
-      });
-    }
-
-    // Handle MongoDB duplicate key errors
-    if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern)[0];
-      return res.status(400).json({ 
-        message: `${field} already exists` 
-      });
-    }
-
-    // Handle MongoDB connection errors
-    if (error.name === 'MongoServerError' || error.name === 'MongoNetworkError' || error.message.includes('buffering timed out')) {
-      console.error('MongoDB connection error:', error.message);
-      return res.status(503).json({ 
-        message: 'Database connection error',
-        error: 'Unable to connect to database. Please try again in a moment.'
-      });
-    }
-
-    // Handle Mongoose connection errors
-    if (error.name === 'MongooseError' || error.message.includes('Connection')) {
-      console.error('Mongoose connection error:', error.message);
-      return res.status(503).json({ 
-        message: 'Database connection error',
-        error: 'Database is currently unavailable. Please try again in a moment.'
-      });
-    }
-
-    // Handle other errors - always log full error in server logs
-    console.error('Registration error details:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
-      code: error.code
-    });
-    
-    // Return error response
-    res.status(500).json({ 
-      message: 'Server error during registration',
-      error: process.env.NODE_ENV === 'production' 
-        ? 'Internal server error. Please check server logs.' 
-        : error.message,
-      // Include error details in development
-      ...(process.env.NODE_ENV !== 'production' && {
-        stack: error.stack,
-        name: error.name
-      })
-    });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 

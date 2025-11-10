@@ -34,29 +34,19 @@ if (process.env.MONGO_URI) {
   console.error('⚠️  Cannot connect to database - MONGO_URI not set');
 }
 
-// Middleware to check database connection and ensure it's ready
-const checkDBConnection = async (req, res, next) => {
-  try {
-    const state = mongoose.connection.readyState;
-    console.log('DB Connection State:', state, '(0=disconnected, 1=connected, 2=connecting, 3=disconnecting)');
-    
-    if (state !== 1) {
-      console.warn('Database not connected. Attempting to connect...');
-      // Wait for connection with timeout
-      await Promise.race([
-        connectDB(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timeout')), 10000)
-        )
-      ]);
-      console.log('Database connection established');
-    }
-    next();
-  } catch (error) {
-    console.error('Database connection error in middleware:', error);
-    // Still continue - Mongoose will buffer, but log the error
-    next();
+// Middleware to ensure database connection is initiated (non-blocking)
+// Mongoose will buffer commands automatically if not connected
+const checkDBConnection = (req, res, next) => {
+  // If disconnected, initiate connection in background (non-blocking)
+  if (mongoose.connection.readyState === 0 && process.env.MONGO_URI) {
+    // Fire and forget - Mongoose will handle buffering
+    connectDB().catch(err => {
+      // Error will be handled when database operations are attempted
+      console.error('DB connection error (will retry on next request):', err.message);
+    });
   }
+  // Always proceed - Mongoose buffers commands automatically
+  next();
 };
 
 // Middlewares

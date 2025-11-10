@@ -12,16 +12,6 @@ const registerUser = async (req, res) => {
   });
   
   try {
-    // Check if database is connected
-    const mongoose = require('mongoose');
-    if (mongoose.connection.readyState !== 1) {
-      console.error('Database not connected. State:', mongoose.connection.readyState);
-      return res.status(503).json({ 
-        message: 'Database connection unavailable',
-        error: 'Please try again in a moment'
-      });
-    }
-
     const { name, email, password } = req.body;
 
     // Validate required fields
@@ -113,6 +103,24 @@ const registerUser = async (req, res) => {
       const field = Object.keys(error.keyPattern)[0];
       return res.status(400).json({ 
         message: `${field} already exists` 
+      });
+    }
+
+    // Handle MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongoNetworkError' || error.message.includes('buffering timed out')) {
+      console.error('MongoDB connection error:', error.message);
+      return res.status(503).json({ 
+        message: 'Database connection error',
+        error: 'Unable to connect to database. Please try again in a moment.'
+      });
+    }
+
+    // Handle Mongoose connection errors
+    if (error.name === 'MongooseError' || error.message.includes('Connection')) {
+      console.error('Mongoose connection error:', error.message);
+      return res.status(503).json({ 
+        message: 'Database connection error',
+        error: 'Database is currently unavailable. Please try again in a moment.'
       });
     }
 

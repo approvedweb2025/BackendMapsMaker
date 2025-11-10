@@ -17,10 +17,32 @@ connectDB();
 const app = express();
 
 // Middlewares
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'https://maps-maker-frontend-8ntc.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+].filter(Boolean); // Remove any undefined values
+
 app.use(cors({
-  // ❗️ FRONTEND_URL ko environment variable se lein
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      // Log for debugging (remove in production if needed)
+      console.log('CORS: Blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400, // 24 hours
 }));
 
 app.set('trust proxy', 1); 
@@ -38,6 +60,7 @@ app.use(session({
   }
 }));
 
+app.use(cookieParser());
 app.use(passport.initialize());
 app.use(passport.session());
 

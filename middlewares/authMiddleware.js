@@ -41,4 +41,7 @@ const isAdmin = (req, res, next) => {
   return next();
 };
 
-module.exports = { authMiddleware, isAdmin };
+module.exports = { isAdmin };
+
+
+module.exports=({authMiddleware, isAdmin})

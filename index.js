@@ -21,29 +21,20 @@ app.use(cors({
   // ❗️ FRONTEND_URL ko environment variable se lein
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
-  methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','X-Requested-With']
 }));
-
-// Handle preflight for all routes
-app.options('*', cors());
 
 app.set('trust proxy', 1); 
 
-// Parse cookies for auth/session flows
-app.use(cookieParser());
-
-// Session config: environment-aware for local dev vs production
-const isProduction = process.env.NODE_ENV === 'production';
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'change-me',
+  secret: process.env.SESSION_SECRET, // Yeh Vercel variables mein set hona chahiye
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: isProduction,                  // HTTPS only in production
-    httpOnly: true,
-    sameSite: isProduction ? 'none' : 'lax', // allow cross-site in prod, dev works on http
-    maxAge: 24 * 60 * 60 * 1000
+    // Production environment ke liye settings
+    secure: true,           // Sirf HTTPS par cookie bhejein
+    httpOnly: true,         // Client-side JavaScript se cookie access na ho
+    sameSite: 'none',       // Cross-domain requests ke liye ijazat dein
+    maxAge: 24 * 60 * 60 * 1000 // 1 din
   }
 }));
 
@@ -55,11 +46,6 @@ app.use(express.json());
 // Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
-
-// Health check
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', env: process.env.NODE_ENV || 'development' });
-});
 
 // Google Auth
 app.get('/', (req, res) => {
@@ -105,11 +91,3 @@ app.get('/api/images', async (req, res) => {
 
 // ✅ Vercel ke liye app ko export karein
 module.exports = app;
-
-// Start server locally if run directly (not in serverless/Vercel)
-if (require.main === module) {
-  const port = process.env.PORT || 3000;
-  app.listen(port, () => {
-    console.log(`API listening on http://localhost:${port}`);
-  });
-}

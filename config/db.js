@@ -20,10 +20,12 @@ const connectDB = async () => {
   // If connection is in progress, wait for it
   if (!cached.promise) {
     const opts = {
-      bufferCommands: false,
+      bufferCommands: true, // Enable buffering - Mongoose will queue commands until connected
+      bufferMaxEntries: 0, // Unlimited buffering (default) - queue all commands
       maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 10000, // Wait up to 10 seconds to select a server
+      socketTimeoutMS: 45000, // How long to wait for a socket operation
+      connectTimeoutMS: 10000, // How long to wait for initial connection
     };
 
     cached.promise = mongoose.connect(process.env.MONGO_URI, opts).then((mongoose) => {

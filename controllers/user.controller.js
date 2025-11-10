@@ -5,17 +5,43 @@ const jwt = require('jsonwebtoken');
 
 // Register a new user
 const registerUser = async (req, res) => {
-  const { name, email, password } = req.body;
-
-
   try {
+    const { name, email, password } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !password) {
+      return res.status(400).json({ 
+        message: 'All fields are required',
+        missing: {
+          name: !name,
+          email: !email,
+          password: !password
+        }
+      });
+    }
+
+    // Validate password length
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+    }
+
+    // Validate email format (basic check)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: 'Invalid email format' });
+    }
+
     // Check if user exists by Email
     const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ message: 'User already exists' });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
 
-    // Check if user exists by Email
+    // Check if user exists by name
     const existingUserByname = await User.findOne({ name });
-    if (existingUserByname) return res.status(400).json({ message: 'Change Your Username, and try again' });
+    if (existingUserByname) {
+      return res.status(400).json({ message: 'Change Your Username, and try again' });
+    }
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -24,29 +50,56 @@ const registerUser = async (req, res) => {
 
     let user;
     if (allUsers.length === 0) {
-      // Create admin
+      // Create admin (first user)
       user = await User.create({
         name,
-        email,
+        email: email.toLowerCase().trim(),
         password: hashedPassword,
         role: 'admin',
         statusaccess: 'approved',
       });
     } else {
-
-      // Create user
+      // Create regular user
       user = await User.create({
         name,
-        email,
+        email: email.toLowerCase().trim(),
         password: hashedPassword,
         permissions: ['Dashboard', 'MyInfo']
       });
     }
 
+    // Remove password from response
+    const { password: _, ...userData } = user.toObject();
 
-    res.status(201).json({ message: 'User registered', user });
+    res.status(201).json({ 
+      message: 'User registered successfully', 
+      user: userData 
+    });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Registration error:', error);
+    
+    // Handle MongoDB validation errors
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        message: 'Validation error', 
+        errors 
+      });
+    }
+
+    // Handle MongoDB duplicate key errors
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({ 
+        message: `${field} already exists` 
+      });
+    }
+
+    // Handle other errors
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message 
+    });
   }
 };
 

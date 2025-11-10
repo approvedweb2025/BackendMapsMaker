@@ -4,9 +4,7 @@ require('dotenv').config();
 const axios = require('axios');
 const { allowedEmails } = require('../config/allowedEmail');
 
-// Only configure Google Strategy if required environment variables are set
-if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.CALLBACK_URL) {
-  passport.use(new GoogleStrategy({
+passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     callbackURL: process.env.CALLBACK_URL,
@@ -14,7 +12,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.
     prompt: 'consent',
     includeGrantedScopes: true,
     passReqToCallback: true
-  },
+},
     async function (req, accessToken, refreshToken, profile, done) {
         try {
             // ✅ Get email safely
@@ -43,11 +41,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.
             return done(error);
         }
     }
-  ));
-  console.log('✅ Google OAuth strategy configured');
-} else {
-  console.warn('⚠️  Google OAuth not configured - missing GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or CALLBACK_URL');
-}
+));
 
 passport.serializeUser((user, done) => {
     done(null, {

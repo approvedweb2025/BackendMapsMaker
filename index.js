@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 const userRoutes = require('./routes/user.route.js');
 const photoRoutes = require('./routes/photo.route.js');
@@ -12,9 +13,27 @@ const Image = require('./models/Image.model.js');
 require('./auth/google.js');
 
 dotenv.config();
-connectDB();
 
 const app = express();
+
+// Connect to database (non-blocking for serverless)
+connectDB().catch(err => {
+  console.error('Database connection error:', err);
+});
+
+// Middleware to check database connection
+const checkDBConnection = (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+    console.warn('Database not connected. State:', mongoose.connection.readyState);
+    // Try to reconnect
+    connectDB().catch(err => {
+      console.error('Reconnection attempt failed:', err);
+    });
+    // Continue anyway - Mongoose will buffer commands
+  }
+  next();
+};
 
 // Middlewares
 const allowedOrigins = [
@@ -66,9 +85,9 @@ app.use(passport.session());
 
 app.use(express.json());
 
-// Routes
-app.use('/users', userRoutes);
-app.use('/photos', photoRoutes);
+// Apply DB connection check to database routes
+app.use('/users', checkDBConnection, userRoutes);
+app.use('/photos', checkDBConnection, photoRoutes);
 
 // Google Auth
 app.get('/', (req, res) => {
@@ -102,7 +121,7 @@ app.get('/logout', (req, res, next) => {
 });
 
 // ✅ Test API for images
-app.get('/api/images', async (req, res) => {
+app.get('/api/images', checkDBConnection, async (req, res) => {
   try {
     const images = await Image.find({ latitude: { $ne: null }, longitude: { $ne: null } });
     res.json(images);
@@ -110,6 +129,32 @@ app.get('/api/images', async (req, res) => {
     console.error('Failed to fetch images:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// Global error handler middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  
+  // CORS error
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ 
+      message: 'CORS error', 
+      error: 'Origin not allowed' 
+    });
+  }
+  
+  // Default error
+  res.status(err.status || 500).json({
+    message: err.message || 'Internal server error',
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Internal server error' 
+      : err.stack
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ message: 'Route not found' });
 });
 
 // ✅ Vercel ke liye app ko export karein

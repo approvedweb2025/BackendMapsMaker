@@ -227,7 +227,7 @@ const getSecondEmailImage = async (req, res) => {
 
 const getThirdEmailImage = async (req, res) => {
   try {
-    const email = 'mhuzaifa8519@gmail.com';
+    const email = 'mhuzaifa86797@gmail.com';
     const images = await Image.find({ uploadedBy: email, longitude: { $ne: null }, latitude: { $ne: null } }).select('-imageData');
     res.status(200).json(images);
   } catch {

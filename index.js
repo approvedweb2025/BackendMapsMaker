@@ -20,6 +20,7 @@ const app = express();
 app.use(cors({
   // ❗️ FRONTEND_URL ko environment variable se lein
   origin: process.env.FRONTEND_URL || 'https://maps-maker-frontend.vercel.app',
+  methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true,
 }));
 

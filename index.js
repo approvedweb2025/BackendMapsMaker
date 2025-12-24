@@ -14,21 +14,6 @@ require('./auth/google.js');
 dotenv.config();
 connectDB();
 
-const MongoStore = require('connect-mongo');
-
-app.use(session({
-  secret: process.env.SESSION_SECRET, 
-  resave: false,
-  saveUninitialized: false,
-  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }), // Add this!
-  cookie: {
-    secure: true, 
-    httpOnly: true,
-    sameSite: 'none',
-    maxAge: 24 * 60 * 60 * 1000
-  }
-}));
-
 const app = express();
 
 // Middlewares

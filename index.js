@@ -32,13 +32,10 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     // Production environment ke liye settings
-   cookie: {
-  secure: process.env.NODE_ENV === 'production', 
-  httpOnly: true,
-  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-  maxAge: 24 * 60 * 60 * 1000
-}
- // 1 din
+    secure: true,           // Sirf HTTPS par cookie bhejein
+    httpOnly: true,         // Client-side JavaScript se cookie access na ho
+    sameSite: 'none',       // Cross-domain requests ke liye ijazat dein
+    maxAge: 24 * 60 * 60 * 1000 // 1 din
   }
 }));
 

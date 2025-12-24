@@ -7,88 +7,78 @@ const photoRoutes = require('./routes/photo.route.js');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
+const MongoStore = require('connect-mongo'); // ✅ Added
 const Image = require('./models/Image.model.js');
 
 require('./auth/google.js');
 
 dotenv.config();
-connectDB();
+const connectionPromise = connectDB(); // Ensure this returns the mongoose connection
 
 const app = express();
 
 // Middlewares
 app.use(cors({
-  // ❗️ FRONTEND_URL ko environment variable se lein
-  origin: process.env.FRONTEND_URL || 'https://maps-maker-frontend.vercel.app',
+  origin: process.env.FRONTEND_URL, // e.g., https://maps-maker-frontend.vercel.app
   credentials: true,
   optionsSuccessStatus: 200
 }));
 
-app.set('trust proxy', 1); 
+app.set('trust proxy', 1); // ✅ Vercel ke liye zaroori hai
 
+app.use(express.json());
+app.use(cookieParser());
+
+// ✅ Updated Session with MongoStore
 app.use(session({
-  secret: process.env.SESSION_SECRET, // Yeh Vercel variables mein set hona chahiye
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGO_URI, // Aapka MongoDB connection string
+    ttl: 24 * 60 * 60 // 1 din tak session rahega
+  }),
   cookie: {
-    // Production environment ke liye settings
-    secure: true,           // Sirf HTTPS par cookie bhejein
-    httpOnly: true,         // Client-side JavaScript se cookie access na ho
-    sameSite: 'none',       // Cross-domain requests ke liye ijazat dein
-    maxAge: 24 * 60 * 60 * 1000 // 1 din
+    secure: true,       // HTTPS zaroori hai (Vercel provides this)
+    httpOnly: true,
+    sameSite: 'none',   // Cross-domain (frontend-backend alag domains) ke liye
+    maxAge: 24 * 60 * 60 * 1000
   }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.use(express.json());
-
 // Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
-// Google Auth
-app.get('/', (req, res) => {
-  res.send('<a href="/auth/google">Continue With Google</a>');
-});
-
 app.get('/auth/google',
   passport.authenticate('google', {
-    scope: [
-      'profile',
-      'email',
-      'https://www.googleapis.com/auth/drive.readonly'
-    ],
+    scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.readonly'],
     accessType: 'offline',
     prompt: 'consent'
   })
 );
 
 app.get('/gtoken',
-  passport.authenticate('google', {
-    failureRedirect: `${process.env.FRONTEND_URL}/home`,
-    successRedirect: '/photos/sync-images', // must exist in photoRoutes
-  })
+  passport.authenticate('google', { failureRedirect: `${process.env.FRONTEND_URL}/login` }),
+  (req, res) => {
+    // Sync hone ke baad wapis FRONTEND par bhejna zaroori hai
+    res.redirect('/photos/sync-images'); 
+  }
 );
 
-app.get('/logout', (req, res, next) => {
-  req.logout(err => {
-    if (err) return next(err);
-    res.redirect('/');
-  });
-});
+// Photo Routes ke andar sync-images ke baad redirect lazmi karein:
+// res.redirect(`${process.env.FRONTEND_URL}/home`);
 
-// ✅ Test API for images
 app.get('/api/images', async (req, res) => {
   try {
     const images = await Image.find({ latitude: { $ne: null }, longitude: { $ne: null } });
     res.json(images);
   } catch (err) {
-    console.error('Failed to fetch images:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// ✅ Vercel ke liye app ko export karein
 module.exports = app;

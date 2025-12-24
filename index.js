@@ -7,8 +7,6 @@ const photoRoutes = require('./routes/photo.route.js');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
-const path = require('path');
-const fs = require('fs');
 const Image = require('./models/Image.model.js');
 
 require('./auth/google.js');
@@ -17,30 +15,26 @@ dotenv.config();
 connectDB();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// ✅ Ensure uploads folder exists
-const uploadsDir = path.join(__dirname, 'public/uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// ✅ Middlewares
+// Middlewares
 app.use(cors({
-  origin: 'http://localhost:5173',
+  // ❗️ FRONTEND_URL ko environment variable se lein
+  origin: process.env.FRONTEND_URL || 'https://maps-maker-frontend.vercel.app',
   credentials: true,
 }));
 
-app.use(cookieParser()); // ✅ should come before session
+app.set('trust proxy', 1); 
 
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'mysecret',
+  secret: process.env.SESSION_SECRET, // Yeh Vercel variables mein set hona chahiye
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false, // true if HTTPS
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 1 day
+    // Production environment ke liye settings
+    secure: true,           // Sirf HTTPS par cookie bhejein
+    httpOnly: true,         // Client-side JavaScript se cookie access na ho
+    sameSite: 'none',       // Cross-domain requests ke liye ijazat dein
+    maxAge: 24 * 60 * 60 * 1000 // 1 din
   }
 }));
 
@@ -49,10 +43,7 @@ app.use(passport.session());
 
 app.use(express.json());
 
-// ✅ Static folder for uploads
-app.use('/uploads', express.static(uploadsDir));
-
-// ✅ Routes
+// Routes
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
@@ -98,6 +89,5 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Server is running on http://localhost:${PORT}`);
-});
+// ✅ Vercel ke liye app ko export karein
+module.exports = app;

@@ -7,31 +7,34 @@ const photoRoutes = require('./routes/photo.route.js');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const session = require('express-session');
+const MongoStore = require('connect-mongo'); // ❗ YEH LINE MISSING THI
 const Image = require('./models/Image.model.js');
 
 require('./auth/google.js');
 
 dotenv.config();
+
+// DB Connection
 connectDB();
 
 const app = express();
 
 // Middlewares
 app.use(cors({
-  // ❗️ FRONTEND_URL ko environment variable se lein
   origin: process.env.FRONTEND_URL || 'https://maps-maker-frontend.vercel.app',
   credentials: true,
 }));
 
 app.set('trust proxy', 1); 
 
+// Session Configuration
 app.use(session({
-  secret: process.env.SESSION_SECRET,
+  secret: process.env.SESSION_SECRET || 'anything-secret', // Default value agar env na mile
   resave: false,
   saveUninitialized: false,
   store: MongoStore.create({
-    mongoUrl: process.env.MONGO_URI, // Aapka MongoDB connection string
-    ttl: 14 * 24 * 60 * 60 // 14 days
+    mongoUrl: process.env.MONGO_URI, 
+    ttl: 14 * 24 * 60 * 60
   }),
   cookie: {
     secure: true,
@@ -50,18 +53,13 @@ app.use(express.json());
 app.use('/users', userRoutes);
 app.use('/photos', photoRoutes);
 
-// Google Auth
 app.get('/', (req, res) => {
-  res.send('<a href="/auth/google">Continue With Google</a>');
+  res.send('Backend is running! <a href="/auth/google">Continue With Google</a>');
 });
 
 app.get('/auth/google',
   passport.authenticate('google', {
-    scope: [
-      'profile',
-      'email',
-      'https://www.googleapis.com/auth/drive.readonly'
-    ],
+    scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.readonly'],
     accessType: 'offline',
     prompt: 'consent'
   })
@@ -69,8 +67,8 @@ app.get('/auth/google',
 
 app.get('/gtoken',
   passport.authenticate('google', {
-    failureRedirect: `${process.env.FRONTEND_URL}/home`,
-    successRedirect: '/photos/sync-images', // must exist in photoRoutes
+    failureRedirect: `${process.env.FRONTEND_URL || 'https://maps-maker-frontend.vercel.app'}/home`,
+    successRedirect: '/photos/sync-images',
   })
 );
 
@@ -81,16 +79,13 @@ app.get('/logout', (req, res, next) => {
   });
 });
 
-// ✅ Test API for images
 app.get('/api/images', async (req, res) => {
   try {
     const images = await Image.find({ latitude: { $ne: null }, longitude: { $ne: null } });
     res.json(images);
   } catch (err) {
-    console.error('Failed to fetch images:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// ✅ Vercel ke liye app ko export karein
 module.exports = app;

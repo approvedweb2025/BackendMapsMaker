@@ -26,15 +26,15 @@ app.use(cors({
 app.set('trust proxy', 1); 
 
 app.use(session({
-  secret: process.env.SESSION_SECRET, // Yeh Vercel variables mein set hona chahiye
+  secret: process.env.SESSION_SECRET || 'fallback-secret-for-dev', 
   resave: false,
   saveUninitialized: false,
+  proxy: true, // Required for Vercel
   cookie: {
-    // Production environment ke liye settings
-    secure: true,           // Sirf HTTPS par cookie bhejein
-    httpOnly: true,         // Client-side JavaScript se cookie access na ho
-    sameSite: 'none',       // Cross-domain requests ke liye ijazat dein
-    maxAge: 24 * 60 * 60 * 1000 // 1 din
+    secure: true,
+    httpOnly: true,
+    sameSite: 'none',
+    maxAge: 24 * 60 * 60 * 1000
   }
 }));
 
